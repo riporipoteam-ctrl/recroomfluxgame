@@ -2,7 +2,7 @@ import http from "node:http";
 import { URL } from "node:url";
 
 const listenHost = process.env.FLUX_RECROOM_PROXY_HOST || "127.0.0.1";
-const listenPort = Number(process.env.FLUX_RECROOM_PROXY_PORT || "2059");
+const listenPort = Number(process.env.FLUX_RECROOM_PROXY_PORT || "81");
 const gateway = (process.env.FLUX_RECROOM_GATEWAY_URL || "").trim().replace(/\/+$/, "");
 const sessionToken = (process.env.FLUX_RECROOM_SESSION_TOKEN || "").trim();
 
@@ -41,6 +41,19 @@ const blockedResponseHeaders = new Set([
   "upgrade",
 ]);
 
+const localServicePrefixes = [
+  "/psettingsx",
+  "/leaderb",
+  "/disco",
+  "/acct",
+  "/shop",
+  "/no",
+  "/r",
+  "/m",
+  "/l",
+  "/c",
+].sort((a, b) => b.length - a.length);
+
 async function readBody(req) {
   const chunks = [];
   let total = 0;
@@ -74,11 +87,29 @@ function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
+function normalizeClientPath(rawUrl) {
+  let value = rawUrl || "/";
+  // Same-length binary redirects may intentionally create a double slash when
+  // the original rec.net base was one byte longer than our localhost base.
+  while (value.startsWith("//")) value = value.slice(1);
+
+  const queryIndex = value.indexOf("?");
+  const pathOnly = queryIndex >= 0 ? value.slice(0, queryIndex) : value;
+  const suffix = queryIndex >= 0 ? value.slice(queryIndex) : "";
+  for (const prefix of localServicePrefixes) {
+    if (pathOnly === prefix || pathOnly.startsWith(`${prefix}/`)) {
+      const stripped = pathOnly.slice(prefix.length) || "/";
+      return `${stripped.startsWith("/") ? stripped : `/${stripped}`}${suffix}`;
+    }
+  }
+  return `${pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`}${suffix}`;
+}
+
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
-  const url = req.url || "/";
+  const rawUrl = req.url || "/";
 
-  if (url === "/flux/local-health") {
+  if (rawUrl === "/flux/local-health") {
     return sendJson(res, 200, {
       ok: true,
       service: "flux-recroom-host-proxy",
@@ -86,11 +117,14 @@ const server = http.createServer(async (req, res) => {
       targetBuild: "2022-05-19",
       buildId: "8751857",
       sessionConfigured: true,
+      listenPort,
+      redirectMode: "same-length-recnet-v1",
     });
   }
 
   try {
-    const target = new URL(url, `${gateway}/`);
+    const normalizedUrl = normalizeClientPath(rawUrl);
+    const target = new URL(normalizedUrl, `${gateway}/`);
     const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
     const response = await fetch(target, {
       method: req.method || "GET",
@@ -107,17 +141,18 @@ const server = http.createServer(async (req, res) => {
     });
     headers["content-length"] = String(responseBody.length);
     headers["x-flux-proxied"] = "1";
+    headers["x-flux-client-path"] = normalizedUrl.slice(0, 256);
 
     res.writeHead(response.status, headers);
     if (req.method === "HEAD") res.end();
     else res.end(responseBody);
 
     if (process.env.FLUX_RECROOM_PROXY_LOG !== "0") {
-      console.log(`${req.method || "GET"} ${url} -> ${response.status} (${Date.now() - started}ms)`);
+      console.log(`${req.method || "GET"} ${rawUrl} => ${normalizedUrl} -> ${response.status} (${Date.now() - started}ms)`);
     }
   } catch (error) {
     const statusCode = Number(error?.statusCode) || 502;
-    console.error(`${req.method || "GET"} ${url} proxy error:`, error instanceof Error ? error.message : error);
+    console.error(`${req.method || "GET"} ${rawUrl} proxy error:`, error instanceof Error ? error.message : error);
     if (!res.headersSent) {
       sendJson(res, statusCode, {
         ok: false,
