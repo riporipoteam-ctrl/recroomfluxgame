@@ -1,0 +1,30 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+
+# Never commit proprietary client binaries or locally supplied builds
+client/
+client-builds/
+RecRoom.exe
+Recroom_Release.exe
+*.dll
+*.assets
+*.bundle
+*.resource
+*.resS
+
+# Runtime state / traces may contain account identifiers or bearer tokens
+data/
+logs/
+traces/
+*.log
+
+# Firebase Admin credentials
+*service-account*.json
+firebase-admin*.json
+
+.DS_Store
+Thumbs.db
