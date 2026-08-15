@@ -2,12 +2,23 @@ import fs from "node:fs";
 import path from "node:path";
 
 const args = process.argv.slice(2);
-const rootIndex = args.indexOf("--root");
-const root = path.resolve(
-  rootIndex >= 0 && args[rootIndex + 1]
-    ? args[rootIndex + 1]
-    : process.env.FLUX_RECROOM_CLIENT_DIR || "client",
-);
+
+function optionValue(name) {
+  const index = args.indexOf(name);
+  if (index < 0) return "";
+  const parts = [];
+  for (let i = index + 1; i < args.length; i += 1) {
+    if (args[i].startsWith("--")) break;
+    parts.push(args[i]);
+  }
+  return parts.join(" ").trim();
+}
+
+// Windows PowerShell 5.1 can split a quoted path when a command is nested inside
+// another -Command string. Reassembling the option tokens here makes the tool
+// tolerant of paths like "May 19 2022" even if that outer shell strips quotes.
+const rootArg = optionValue("--root");
+const root = path.resolve(rootArg || process.env.FLUX_RECROOM_CLIENT_DIR || "client");
 const restore = args.includes("--restore");
 const dryRun = args.includes("--dry-run");
 const localBase = (process.env.FLUX_RECROOM_LOCAL_BASE || "http://127.0.0.1:81").replace(/\/+$/, "");
