@@ -12,7 +12,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "verify-client": "node scripts/verify-client.mjs"
+    "verify-client": "node scripts/verify-client.mjs",
+    "scan-client-urls": "node scripts/scan-client-urls.mjs",
+    "host-proxy": "node scripts/host-proxy.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.1.0",
