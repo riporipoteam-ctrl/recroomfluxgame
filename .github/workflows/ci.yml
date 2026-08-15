@@ -19,6 +19,12 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Syntax-check client/host scripts
+        run: |
+          node --check scripts/verify-client.mjs
+          node --check scripts/scan-client-urls.mjs
+          node --check scripts/patch-client-urls.mjs
+          node --check scripts/host-proxy.mjs
       - name: Typecheck
         run: npm run typecheck
       - name: Test
