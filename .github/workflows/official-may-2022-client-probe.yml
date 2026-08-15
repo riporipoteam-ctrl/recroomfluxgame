@@ -30,10 +30,11 @@ jobs:
           if (-not $steam) { throw "SteamCMD was not installed." }
           "STEAMCMD=$steam" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Ask Valve for the exact free-game depot manifest
+      - name: Ask Valve for the exact May 2022 depot manifest
         shell: powershell
         run: |
           $content = Join-Path $env:RUNNER_TEMP "steam-content"
+          $log = Join-Path $env:RUNNER_TEMP "steamcmd-recroom.log"
           New-Item -ItemType Directory -Force -Path $content | Out-Null
           Push-Location $content
           try {
@@ -42,15 +43,38 @@ jobs:
               +@NoPromptForPassword 1 `
               +login anonymous `
               +download_depot 471710 471711 6337851004861751095 `
-              +quit
-            if ($LASTEXITCODE -ne 0) { throw "Valve/SteamCMD rejected the anonymous depot request (exit $LASTEXITCODE)." }
+              +quit 2>&1 | Tee-Object -FilePath $log
+            $exitCode = $LASTEXITCODE
           } finally {
             Pop-Location
           }
 
+          if ($exitCode -eq 0) {
+            "OFFICIAL_DEPOT_OK=true" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Valve allowed the exact archived depot manifest on this ephemeral runner."
+            exit 0
+          }
+
+          $text = Get-Content $log -Raw -ErrorAction SilentlyContinue
+          if ($text -match "missing license for depot" -or $text -match "No subscription") {
+            "OFFICIAL_DEPOT_OK=false" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "OFFICIAL_DEPOT_RESULT=license-required" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "OFFICIAL_DEPOT_OK=false"
+            Write-Host "OFFICIAL_DEPOT_RESULT=license-required"
+            Write-Host "Valve requires a licensed/subscribed Steam account for this retired depot manifest."
+            exit 0
+          }
+
+          throw "SteamCMD failed for an unexpected reason (exit $exitCode)."
+
       - name: Verify May 19 2022 client layout without redistributing it
         shell: powershell
         run: |
+          if ($env:OFFICIAL_DEPOT_OK -ne "true") {
+            Write-Host "Client layout check skipped: $env:OFFICIAL_DEPOT_RESULT"
+            exit 0
+          }
+
           $roots = @(
             (Join-Path $env:RUNNER_TEMP "steam-content"),
             (Split-Path $env:STEAMCMD -Parent)
