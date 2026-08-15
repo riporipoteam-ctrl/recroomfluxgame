@@ -234,10 +234,11 @@ export async function buildServer() {
   });
 
   app.setErrorHandler((error, request, reply) => {
-    const statusCode = Number((error as Error & { statusCode?: number }).statusCode) || 500;
-    if (statusCode >= 500) request.log.error({ err: error }, "request failed");
-    else request.log.info({ err: error }, "request rejected");
-    reply.code(statusCode).send({ ok: false, error: error.message, statusCode });
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    const statusCode = Number((normalized as Error & { statusCode?: number }).statusCode) || 500;
+    if (statusCode >= 500) request.log.error({ err: normalized }, "request failed");
+    else request.log.info({ err: normalized }, "request rejected");
+    reply.code(statusCode).send({ ok: false, error: normalized.message, statusCode });
   });
 
   app.setNotFoundHandler((request, reply) => {
