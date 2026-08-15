@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 
 const args = process.argv.slice(2);
 const rootIndex = args.indexOf("--root");
@@ -53,15 +52,12 @@ const allowedNames = new Set(["globalgamemanagers", "globalgamemanagers.assets"]
 const excludedSuffixes = [".flux-backup", ".update-backup", ".update-new"];
 const maxFileBytes = Number(process.env.FLUX_RECROOM_REDIRECT_MAX_FILE_BYTES || String(768 * 1024 * 1024));
 
-function sha256(buffer) {
-  return crypto.createHash("sha256").update(buffer).digest("hex");
-}
-
 function shouldInspect(file, stat) {
   const lower = file.toLowerCase();
+  const name = path.basename(lower);
+  if (name === ".flux-recroom-redirect.json" || name.startsWith(".flux-recroom-redirect.")) return false;
   if (excludedSuffixes.some((suffix) => lower.endsWith(suffix))) return false;
   if (stat.size <= 0 || stat.size > maxFileBytes) return false;
-  const name = path.basename(lower);
   const ext = path.extname(lower);
   return allowedNames.has(name) || allowedExtensions.has(ext);
 }
@@ -113,6 +109,8 @@ if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
 
 if (restore) {
   let restored = 0;
+  // Backup files are intentionally excluded from walk(), so inspect the real
+  // candidate files and restore their sidecar backups one by one.
   for (const { file } of walk(root)) {
     const backup = `${file}.flux-backup`;
     if (!fs.existsSync(backup)) continue;
