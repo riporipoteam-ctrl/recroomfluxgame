@@ -24,7 +24,52 @@ jobs:
           node --check scripts/verify-client.mjs
           node --check scripts/scan-client-urls.mjs
           node --check scripts/patch-client-urls.mjs
+          node --check scripts/redirect-client-urls.mjs
           node --check scripts/host-proxy.mjs
+      - name: Prove same-length Rec Room redirect and restore
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const { spawnSync } = require('child_process');
+          const root = path.join(process.env.RUNNER_TEMP, 'rr-redirect-fixture');
+          fs.mkdirSync(path.join(root, 'Recroom_Release_Data', 'il2cpp_data', 'Metadata'), { recursive: true });
+          const ascii = Buffer.from('PRE:https://accounts.rec.net/Accounts/account/me:POST', 'ascii');
+          const utf16 = Buffer.from('PRE:https://rooms.rec.net/rooms/123:POST', 'utf16le');
+          fs.writeFileSync(path.join(root, 'Recroom_Release.exe'), ascii);
+          fs.writeFileSync(path.join(root, 'GameAssembly.dll'), utf16);
+          fs.writeFileSync(path.join(root, 'Recroom_Release_Data', 'il2cpp_data', 'Metadata', 'global-metadata.dat'), Buffer.from('meta'));
+
+          const beforeAscii = fs.readFileSync(path.join(root, 'Recroom_Release.exe'));
+          const beforeUtf16 = fs.readFileSync(path.join(root, 'GameAssembly.dll'));
+          const apply = spawnSync(process.execPath, ['scripts/redirect-client-urls.mjs', '--root', root], { encoding: 'utf8' });
+          process.stdout.write(apply.stdout); process.stderr.write(apply.stderr);
+          if (apply.status !== 0) throw new Error(`redirect apply failed: ${apply.status}`);
+          const state = JSON.parse(apply.stdout);
+          if (!state.ok || state.preparedOccurrences < 2) throw new Error('redirector did not verify both fixture endpoints');
+
+          const afterAscii = fs.readFileSync(path.join(root, 'Recroom_Release.exe'));
+          const afterUtf16 = fs.readFileSync(path.join(root, 'GameAssembly.dll'));
+          if (afterAscii.length !== beforeAscii.length || afterUtf16.length !== beforeUtf16.length) throw new Error('redirect changed binary file length');
+          const asciiText = afterAscii.toString('ascii');
+          const utf16Text = afterUtf16.toString('utf16le');
+          if (!asciiText.includes('http://127.0.0.1:81/acct/Accounts/account/me')) throw new Error(`ASCII path was not preserved: ${asciiText}`);
+          if (!utf16Text.includes('http://127.0.0.1:81/r/rooms/123')) throw new Error(`UTF-16 path was not preserved: ${utf16Text}`);
+          if (!fs.existsSync(path.join(root, 'Recroom_Release.exe.flux-backup'))) throw new Error('ASCII backup missing');
+          if (!fs.existsSync(path.join(root, 'GameAssembly.dll.flux-backup'))) throw new Error('UTF-16 backup missing');
+
+          const second = spawnSync(process.execPath, ['scripts/redirect-client-urls.mjs', '--root', root], { encoding: 'utf8' });
+          if (second.status !== 0) throw new Error('idempotent redirect rerun failed');
+          const secondState = JSON.parse(second.stdout);
+          if (secondState.sourceOccurrences !== 0 || secondState.preparedOccurrences < 2) throw new Error('redirector is not idempotent');
+
+          const restore = spawnSync(process.execPath, ['scripts/redirect-client-urls.mjs', '--root', root, '--restore'], { encoding: 'utf8' });
+          process.stdout.write(restore.stdout); process.stderr.write(restore.stderr);
+          if (restore.status !== 0) throw new Error('restore failed');
+          if (!fs.readFileSync(path.join(root, 'Recroom_Release.exe')).equals(beforeAscii)) throw new Error('ASCII restore mismatch');
+          if (!fs.readFileSync(path.join(root, 'GameAssembly.dll')).equals(beforeUtf16)) throw new Error('UTF-16 restore mismatch');
+          console.log('RECROOM_REDIRECT_BINARY_TEST_OK=true');
+          NODE
       - name: Typecheck
         run: npm run typecheck
       - name: Test
