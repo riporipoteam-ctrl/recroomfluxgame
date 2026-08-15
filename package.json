@@ -14,6 +14,7 @@
     "test": "vitest run",
     "verify-client": "node scripts/verify-client.mjs",
     "scan-client-urls": "node scripts/scan-client-urls.mjs",
+    "patch-client-urls": "node scripts/patch-client-urls.mjs",
     "host-proxy": "node scripts/host-proxy.mjs"
   },
   "dependencies": {
