@@ -70,6 +70,67 @@ jobs:
           if (!fs.readFileSync(path.join(root, 'GameAssembly.dll')).equals(beforeUtf16)) throw new Error('UTF-16 restore mismatch');
           console.log('RECROOM_REDIRECT_BINARY_TEST_OK=true');
           NODE
+      - name: Prove proxy preserves original Rec Room paths and session auth
+        run: |
+          node <<'NODE'
+          const http = require('http');
+          const { spawn } = require('child_process');
+          const backendPort = 19090;
+          const proxyPort = 18081;
+          const seen = [];
+          const backend = http.createServer((req, res) => {
+            seen.push({ url: req.url, auth: req.headers.authorization, marker: req.headers['x-flux-recroom-host-proxy'] });
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, url: req.url }));
+          });
+
+          (async () => {
+            await new Promise((resolve, reject) => backend.once('error', reject).listen(backendPort, '127.0.0.1', resolve));
+            const child = spawn(process.execPath, ['scripts/host-proxy.mjs'], {
+              env: {
+                ...process.env,
+                FLUX_RECROOM_GATEWAY_URL: `http://127.0.0.1:${backendPort}`,
+                FLUX_RECROOM_SESSION_TOKEN: 'proxy-ci-token',
+                FLUX_RECROOM_PROXY_PORT: String(proxyPort),
+                FLUX_RECROOM_PROXY_LOG: '0',
+              },
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            let stderr = '';
+            child.stderr.on('data', d => { stderr += d.toString(); });
+            try {
+              let healthy = false;
+              for (let i = 0; i < 40; i++) {
+                try {
+                  const r = await fetch(`http://127.0.0.1:${proxyPort}/flux/local-health`);
+                  if (r.ok) { healthy = true; break; }
+                } catch {}
+                await new Promise(r => setTimeout(r, 100));
+              }
+              if (!healthy) throw new Error(`proxy never became healthy: ${stderr}`);
+
+              const cases = [
+                ['/acct/Accounts/account/me?x=1', '/Accounts/account/me?x=1'],
+                ['/r/rooms/123', '/rooms/123'],
+                ['/m/Matchmaking/player/login', '/Matchmaking/player/login'],
+                ['/psettingsx/player/settings', '/player/settings'],
+                ['//api/config/v2', '/api/config/v2'],
+              ];
+              for (const [input, expected] of cases) {
+                const response = await fetch(`http://127.0.0.1:${proxyPort}${input}`, { headers: { authorization: 'Bearer wrong-client-token' } });
+                if (!response.ok) throw new Error(`proxy response ${response.status} for ${input}`);
+                const last = seen.at(-1);
+                if (!last || last.url !== expected) throw new Error(`path mismatch ${input}: got ${last?.url}, want ${expected}`);
+                if (last.auth !== 'Bearer proxy-ci-token') throw new Error(`session auth was not replaced for ${input}`);
+                if (last.marker !== '1') throw new Error(`host proxy marker missing for ${input}`);
+              }
+              console.log('RECROOM_PROXY_PATH_AUTH_TEST_OK=true');
+            } finally {
+              child.kill('SIGTERM');
+              backend.close();
+            }
+          })().catch(error => { console.error(error); process.exit(1); });
+          NODE
       - name: Typecheck
         run: npm run typecheck
       - name: Test
