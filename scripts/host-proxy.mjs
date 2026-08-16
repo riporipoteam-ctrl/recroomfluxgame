@@ -5,6 +5,7 @@ const listenHost = process.env.FLUX_RECROOM_PROXY_HOST || "127.0.0.1";
 const listenPort = Number(process.env.FLUX_RECROOM_PROXY_PORT || "81");
 const gateway = (process.env.FLUX_RECROOM_GATEWAY_URL || "").trim().replace(/\/+$/, "");
 const sessionToken = (process.env.FLUX_RECROOM_SESSION_TOKEN || "").trim();
+const verboseLogging = process.env.FLUX_RECROOM_PROXY_LOG === "1";
 
 if (!gateway) {
   console.error("FLUX_RECROOM_GATEWAY_URL is required.");
@@ -119,6 +120,7 @@ const server = http.createServer(async (req, res) => {
       sessionConfigured: true,
       listenPort,
       redirectMode: "same-length-recnet-v1",
+      verboseLogging,
     });
   }
 
@@ -147,7 +149,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "HEAD") res.end();
     else res.end(responseBody);
 
-    if (process.env.FLUX_RECROOM_PROXY_LOG !== "0") {
+    // The production Windows agent redirects this process' stdout/stderr. If
+    // every RecNet request is logged and nobody continuously drains that pipe,
+    // enough traffic can block the proxy. Keep per-request logging diagnostic-only.
+    if (verboseLogging) {
       console.log(`${req.method || "GET"} ${rawUrl} => ${normalizedUrl} -> ${response.status} (${Date.now() - started}ms)`);
     }
   } catch (error) {
