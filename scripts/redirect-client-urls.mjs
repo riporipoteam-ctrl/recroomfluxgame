@@ -14,9 +14,6 @@ function optionValue(name) {
   return parts.join(" ").trim();
 }
 
-// Windows PowerShell 5.1 can split a quoted path when a command is nested inside
-// another -Command string. Reassembling the option tokens here makes the tool
-// tolerant of paths like "May 19 2022" even if that outer shell strips quotes.
 const rootArg = optionValue("--root");
 const root = path.resolve(rootArg || process.env.FLUX_RECROOM_CLIENT_DIR || "client");
 const restore = args.includes("--restore");
@@ -60,7 +57,7 @@ const allowedExtensions = new Set([
   ".assets", ".resource", ".ress", ".bin", ".manifest",
 ]);
 const allowedNames = new Set(["globalgamemanagers", "globalgamemanagers.assets"]);
-const excludedSuffixes = [".flux-backup", ".update-backup", ".update-new"];
+const excludedSuffixes = [".flux-backup", ".update-backup", ".update-new", ".flux-write"];
 const maxFileBytes = Number(process.env.FLUX_RECROOM_REDIRECT_MAX_FILE_BYTES || String(768 * 1024 * 1024));
 
 function shouldInspect(file, stat) {
@@ -113,6 +110,15 @@ function variants(mapping) {
   ];
 }
 
+function atomicReplace(file, buffer, mode) {
+  // Per-player Wine sandboxes are hard-link clones of one immutable base client.
+  // Writing directly through a hard link would mutate the base image and every
+  // other player's client. Write a fresh inode beside it and rename atomically.
+  const temp = `${file}.${process.pid}.${Date.now()}.flux-write`;
+  fs.writeFileSync(temp, buffer, { mode });
+  fs.renameSync(temp, file);
+}
+
 if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
   console.error(`Client root does not exist: ${root}`);
   process.exit(2);
@@ -120,12 +126,12 @@ if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
 
 if (restore) {
   let restored = 0;
-  // Backup files are intentionally excluded from walk(), so inspect the real
-  // candidate files and restore their sidecar backups one by one.
   for (const { file } of walk(root)) {
     const backup = `${file}.flux-backup`;
     if (!fs.existsSync(backup)) continue;
-    fs.copyFileSync(backup, file);
+    const stat = fs.statSync(file);
+    const original = fs.readFileSync(backup);
+    atomicReplace(file, original, stat.mode);
     fs.unlinkSync(backup);
     restored += 1;
   }
@@ -186,12 +192,10 @@ for (const { file, stat } of files) {
     const variant = variants(mapping).find((item) => item.encoding === change.encoding);
     for (const index of change.indexes) variant.replacement.copy(patched, index);
   }
-  fs.writeFileSync(file, patched);
+  atomicReplace(file, patched, stat.mode);
   changedFiles += 1;
 }
 
-// Re-scan prepared markers after applying so callers can distinguish an already
-// prepared client from a client that has never contained any known endpoints.
 let preparedAfter = 0;
 if (!dryRun) {
   for (const { file } of files) {
