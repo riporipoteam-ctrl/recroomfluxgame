@@ -21,6 +21,25 @@ const dryRun = args.includes("--dry-run");
 const localBase = (process.env.FLUX_RECROOM_LOCAL_BASE || "http://127.0.0.1:81").replace(/\/+$/, "");
 const statePath = path.join(root, ".flux-recroom-redirect.json");
 
+// Build 8751857 does not hardcode every RecNet service host. Its IL2CPP client
+// first requests this v2 bootstrap and deserializes FGCLJJMGLAI.NameServerResponse.
+// Keep the replacement exactly the same byte length so no PE/IL2CPP layout is
+// shifted. RipoTeamServer's local proxy serves /nsx and returns all service URLs.
+const legacyNameServer = {
+  host: "nameserver-v2",
+  source: "https://ns.rec.net/?v=2",
+  replacement: `${localBase}/nsx`,
+};
+if (Buffer.byteLength(legacyNameServer.source, "ascii") !== Buffer.byteLength(legacyNameServer.replacement, "ascii")) {
+  throw new Error(
+    `Unsafe nameserver redirect length: ${legacyNameServer.source.length} != ${legacyNameServer.replacement.length}. ` +
+    `FLUX_RECROOM_LOCAL_BASE must remain ${"http://127.0.0.1:81".length} ASCII bytes.`,
+  );
+}
+
+// Later/other builds can still contain direct service hosts. Retain these
+// redirects as a compatibility fallback, but May 19 2022 only requires the
+// nameserver mapping to count as a valid redirect.
 const suffixByHost = {
   api: "",
   auth: "/",
@@ -40,7 +59,7 @@ const suffixByHost = {
   clubs: "/c",
 };
 
-const mappings = Object.entries(suffixByHost).map(([host, suffix]) => {
+const directMappings = Object.entries(suffixByHost).map(([host, suffix]) => {
   const source = `https://${host}.rec.net`;
   const replacement = `${localBase}${suffix}`;
   if (Buffer.byteLength(source, "ascii") !== Buffer.byteLength(replacement, "ascii")) {
@@ -51,6 +70,7 @@ const mappings = Object.entries(suffixByHost).map(([host, suffix]) => {
   }
   return { host, source, replacement };
 });
+const mappings = [legacyNameServer, ...directMappings];
 
 const allowedExtensions = new Set([
   ".exe", ".dll", ".dat", ".bytes", ".json", ".txt", ".config", ".xml",
@@ -229,8 +249,8 @@ console.log(JSON.stringify(state, null, 2));
 
 if (!state.ok) {
   console.error(
-    "No known rec.net base URLs were found in ASCII or UTF-16LE. " +
-    "Do not assume the client is redirected; inspect runtime traffic or additional Unity assets.",
+    "No May 2022 RecNet nameserver/direct service URLs were found in ASCII or UTF-16LE. " +
+    "Do not assume the client is redirected; inspect the exact client before launch.",
   );
   process.exitCode = 4;
 }
