@@ -1,0 +1,112 @@
+name: Extract May 2022 RecNet Bootstrap Core
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/decompile-may2022-recnet-core.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Download exact build 8751857 IL2CPP inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://archive.recagain.site/2022-05-19T06-50-09Z'
+          curl -fsSL --connect-timeout 15 --max-time 300 -A 'RipoTeam-May2022-RecNetCore/1.0' "$base/GameAssembly.dll" -o GameAssembly.dll
+          curl -fsSL --connect-timeout 15 --max-time 300 -A 'RipoTeam-May2022-RecNetCore/1.0' "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o global-metadata.dat
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+          test "$(sha256sum global-metadata.dat | cut -d' ' -f1)" = 'd77f3728ba1f3765941f90de036f6b283301c156db3d7e31932e56c9b06a9b0c'
+
+      - name: Run Il2CppDumper
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --connect-timeout 15 --max-time 120 'https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net6-v6.7.46.zip' -o dumper.zip
+          mkdir dumper out
+          unzip -q dumper.zip -d dumper
+          dll="$(find dumper -type f -name 'Il2CppDumper.dll' | head -1)"
+          set +e
+          dotnet "$dll" "$PWD/GameAssembly.dll" "$PWD/global-metadata.dat" "$PWD/out" >il2cppdumper.log 2>&1
+          set -e
+          test -s out/dump.cs
+
+      - name: Extract FGCLJJMGLAI core, service enum, and bootstrap disassembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess
+          lines=Path('out/dump.cs').read_text(errors='replace').splitlines()
+          chunks=[]
+
+          def capture(anchor, before=20, after=500, label=None):
+              for i,line in enumerate(lines):
+                  if anchor in line:
+                      lo=max(0,i-before); hi=min(len(lines),i+after)
+                      chunks.append(f'===== {label or anchor} dump.cs lines {lo+1}-{hi} =====')
+                      chunks.extend(f'{j+1}: {lines[j]}' for j in range(lo,hi))
+                      return i
+              chunks.append(f'===== MISSING {anchor} =====')
+              return -1
+
+          fg=capture('internal class FGCLJJMGLAI //', 20, 760, 'FGCLJJMGLAI CORE')
+          capture('enum KHJPLDAEBPP', 20, 180, 'SERVICE ENUM KHJPLDAEBPP')
+          capture('class JMAANPPEBJE', 20, 260, 'BESTHTTP REQUEST JMAANPPEBJE')
+          capture('class DCHGFBHPDAP', 20, 220, 'RESPONSE DCHGFBHPDAP')
+
+          # Find exact method declaration and its RVA.
+          rva=None
+          method_line=None
+          if fg >= 0:
+              for j in range(fg, min(len(lines), fg+900)):
+                  if 'PIPCAIJJNLK' in lines[j]:
+                      method_line=j
+                      for k in range(max(fg,j-4), j+1):
+                          m=re.search(r'RVA:\s*0x([0-9A-Fa-f]+)', lines[k])
+                          if m:
+                              rva=int(m.group(1),16)
+                      break
+          chunks.append(f'PIPCAIJJNLK_LINE={method_line+1 if method_line is not None else None}')
+          chunks.append(f'PIPCAIJJNLK_RVA={hex(rva) if rva is not None else None}')
+
+          Path('recnet-core.txt').write_text('\n'.join(chunks), encoding='utf-8')
+
+          if rva is not None:
+              # GNU objdump on PE accepts RVAs as section VMAs for this image layout.
+              start=max(0,rva-0x80); stop=rva+0x900
+              p=subprocess.run(['objdump','-d','-Mintel',f'--start-address=0x{start:x}',f'--stop-address=0x{stop:x}','GameAssembly.dll'],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+              Path('pipcaijjnlk-disasm.txt').write_text(p.stdout,encoding='utf-8')
+          else:
+              Path('pipcaijjnlk-disasm.txt').write_text('RVA not found\n')
+
+          # Strings that can reveal config keys, cached nameserver behavior, and exact URL casing.
+          s=subprocess.run(['strings','-a','-n','4','GameAssembly.dll'],text=True,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+          terms=('ns.rec.net','NameServer','nameserver','RecNetStatus','cachedNameServer','ConnectToRecNet','ConnectionRequest')
+          found=[x for x in s.stdout.splitlines() if any(t.lower() in x.lower() for t in terms)]
+          Path('recnet-native-strings.txt').write_text('\n'.join(found[:4000]),encoding='utf-8')
+          print('\n'.join(chunks[:1200]))
+          PY
+
+      - name: Upload RecNet bootstrap core
+        uses: actions/upload-artifact@v4
+        with:
+          name: may2022-recnet-bootstrap-core
+          path: |
+            recnet-core.txt
+            pipcaijjnlk-disasm.txt
+            recnet-native-strings.txt
+            il2cppdumper.log
+          retention-days: 3
