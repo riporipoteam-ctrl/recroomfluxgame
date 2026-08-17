@@ -1,0 +1,149 @@
+name: Scan May 2022 Endpoint Strings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/scan-may2022-endpoints.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download only endpoint-bearing May 2022 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://archive.recagain.site/2022-05-19T06-50-09Z'
+          mkdir -p /tmp/rrscan/RecRoom_Data/il2cpp_data/Metadata /tmp/rrscan/RecRoom_Data
+          fetch() {
+            local remote="$1" local_path="$2"
+            echo "fetch $remote"
+            curl -fsSL --connect-timeout 15 --max-time 180 \
+              -A 'RipoTeam-May2022-EndpointScan/1.0' \
+              "$base/$remote" -o "$local_path"
+            echo "bytes $(wc -c <"$local_path") $remote"
+          }
+          fetch 'RecRoom.exe' '/tmp/rrscan/RecRoom.exe'
+          fetch 'Recroom_Release.exe' '/tmp/rrscan/Recroom_Release.exe'
+          fetch 'GameAssembly.dll' '/tmp/rrscan/GameAssembly.dll'
+          fetch 'RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat' '/tmp/rrscan/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat'
+          fetch 'RecRoom_Data/globalgamemanagers' '/tmp/rrscan/RecRoom_Data/globalgamemanagers'
+          fetch 'RecRoom_Data/globalgamemanagers.assets' '/tmp/rrscan/RecRoom_Data/globalgamemanagers.assets'
+
+      - name: Extract likely service endpoint strings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          roots = [p for p in Path('/tmp/rrscan').rglob('*') if p.is_file()]
+          interesting = re.compile(
+              r'(?i)(rec\.net|recroom(?:\.com|\.net)?|https?://|wss?://|api[.-]|auth|account|matchmak|rooms?|photon|leaderboard|commerce|econ|player.?settings|discovery|notify)'
+          )
+          domainish = re.compile(
+              r'(?i)(?:https?|wss?)://[^\s\x00\"\'<>]{3,300}|[a-z0-9][a-z0-9.-]{2,100}\.(?:net|com|io|gg)(?::\d{2,5})?(?:/[^\s\x00\"\'<>]{0,220})?'
+          )
+
+          def ascii_runs(data: bytes):
+              for match in re.finditer(rb'[\x20-\x7e]{6,500}', data):
+                  yield match.start(), match.group().decode('ascii', errors='ignore')
+
+          def utf16_runs(data: bytes):
+              # Decode aligned and one-byte-shifted UTF-16LE to catch metadata strings.
+              for shift in (0, 1):
+                  try:
+                      text = data[shift:].decode('utf-16le', errors='ignore')
+                  except Exception:
+                      continue
+                  for match in re.finditer(r'[ -~]{6,500}', text):
+                      yield shift + match.start() * 2, match.group()
+
+          seen = set()
+          hits = []
+          for path in roots:
+              data = path.read_bytes()
+              rel = path.relative_to('/tmp/rrscan')
+              for encoding, iterator in [('ascii', ascii_runs(data)), ('utf16le', utf16_runs(data))]:
+                  for offset, text in iterator:
+                      if not interesting.search(text):
+                          continue
+                      key = (str(rel), encoding, text)
+                      if key in seen:
+                          continue
+                      seen.add(key)
+                      hits.append((str(rel), offset, encoding, text))
+
+          print('=== DOMAIN/URL HITS ===')
+          domain_rows = []
+          for rel, offset, encoding, text in hits:
+              found = domainish.findall(text)
+              if found:
+                  # findall with outer groups can lose the whole match, so use finditer too.
+                  for m in domainish.finditer(text):
+                      value = m.group(0)
+                      domain_rows.append((rel, offset, encoding, value))
+          for row in sorted(set(domain_rows), key=lambda x: (x[0], x[1], x[3])):
+              print(f'{row[0]}\t0x{row[1]:x}\t{row[2]}\t{row[3]}')
+
+          print('=== REC.NET / RECROOM CONTEXT ===')
+          context_rows = []
+          for rel, offset, encoding, text in hits:
+              low = text.lower()
+              if 'rec.net' in low or 'recroom' in low or 'rec room' in low:
+                  context_rows.append((rel, offset, encoding, text))
+          for rel, offset, encoding, text in sorted(context_rows, key=lambda x: (x[0], x[1])):
+              print(f'{rel}\t0x{offset:x}\t{encoding}\t{text}')
+
+          print('=== SERVICE KEYWORD SAMPLE ===')
+          for rel, offset, encoding, text in hits[:500]:
+              print(f'{rel}\t0x{offset:x}\t{encoding}\t{text}')
+          PY
+
+      - name: Scan raw bytes for legacy rec.net spellings and nearby context
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          needles = [
+              b'rec.net', b'REC.NET', b'recroom.com', b'RecRoom',
+              b'https://', b'http://', b'wss://', b'ws://',
+          ]
+          for path in [p for p in Path('/tmp/rrscan').rglob('*') if p.is_file()]:
+              data=path.read_bytes()
+              rel=path.relative_to('/tmp/rrscan')
+              print(f'--- {rel} ---')
+              emitted=0
+              for needle in needles:
+                  start=0
+                  while emitted < 250:
+                      i=data.find(needle,start)
+                      if i < 0: break
+                      lo=max(0,i-120); hi=min(len(data),i+len(needle)+240)
+                      chunk=data[lo:hi]
+                      printable=''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
+                      print(f'ASCII_CONTEXT 0x{i:x} needle={needle!r} {printable}')
+                      emitted += 1
+                      start=i+1
+              # UTF-16LE direct needles
+              for literal in ('rec.net','recroom.com','https://','http://','wss://'):
+                  needle=literal.encode('utf-16le')
+                  start=0
+                  while emitted < 350:
+                      i=data.find(needle,start)
+                      if i < 0: break
+                      lo=max(0,i-240); hi=min(len(data),i+len(needle)+480)
+                      try: text=data[lo:hi].decode('utf-16le',errors='ignore')
+                      except Exception: text=''
+                      print(f'UTF16_CONTEXT 0x{i:x} needle={literal!r} {text!r}')
+                      emitted += 1
+                      start=i+2
+          PY
