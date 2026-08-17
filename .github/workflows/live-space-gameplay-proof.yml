@@ -13,7 +13,7 @@ permissions:
 jobs:
   gameplay-proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       SPACE_URL: https://echoxr-ripoteam-cloud-pc.hf.space
       FIREBASE_API_KEY: AIzaSyBV_ev8AVpKwgioPSSWiBYf8UU09bLbWOU
@@ -105,63 +105,85 @@ jobs:
           PY
           STREAM_BASE="$(cat /tmp/recroom-proof/stream-base.txt)"
           STREAM_TOKEN="$(cat /tmp/recroom-proof/stream-token.txt)"
+          TOKEN_Q="$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$STREAM_TOKEN")"
           test -n "$STREAM_TOKEN"
 
-          # Prove the interactive stream document is reachable.
-          curl -fsS --max-time 20 "${STREAM_BASE}?token=$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$STREAM_TOKEN")" \
-            -o /tmp/recroom-proof/player.html
+          curl -fsS --max-time 20 "${STREAM_BASE}?token=${TOKEN_Q}" -o /tmp/recroom-proof/player.html
           grep -q 'Rec Room' /tmp/recroom-proof/player.html
 
-          # Verify the input/control endpoint on the live sandbox with the safe
-          # release-all command (no gameplay state is changed).
           INPUT_CODE="$(curl -sS --max-time 10 -o /tmp/recroom-proof/input.json -w '%{http_code}' \
-            -X POST "${STREAM_BASE}input?token=$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$STREAM_TOKEN")" \
+            -X POST "${STREAM_BASE}input?token=${TOKEN_Q}" \
             -H 'content-type: application/json' --data '{"type":"release"}')"
           test "$INPUT_CODE" = '200'
+          jq -e '.ok == true' /tmp/recroom-proof/input.json >/dev/null
           echo 'RECROOM_CONTROLS_ENDPOINT_READY=true'
 
-          # Poll actual game frames until Rec Room renders something other than
-          # the initial all-black startup surface. Keep the last frame as proof.
+          # Ignore X11/window-manager chrome. Only the inner Rec Room viewport
+          # counts as visible game rendering. Wait up to two minutes after the
+          # window becomes ready because Unity can render its first real frame
+          # later than the native top-level window appears.
           VISUAL=0
-          for i in $(seq 1 20); do
-            FRAME_URL="${STREAM_BASE}frame.jpg?token=$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$STREAM_TOKEN")&t=$(date +%s%N)"
+          for i in $(seq 1 24); do
+            FRAME_URL="${STREAM_BASE}frame.jpg?token=${TOKEN_Q}&t=$(date +%s%N)"
             curl -fsS --max-time 20 "$FRAME_URL" -o /tmp/recroom-proof/recroom-frame.jpg
             METRICS="$(python - <<'PY'
           from PIL import Image, ImageStat
           im=Image.open('/tmp/recroom-proof/recroom-frame.jpg').convert('RGB')
-          stat=ImageStat.Stat(im)
+          w,h=im.size
+          # Remove title bar, borders, and bottom resize line entirely.
+          inner=im.crop((max(80,int(w*.08)), max(70,int(h*.10)), min(w-80,int(w*.92)), min(h-60,int(h*.90))))
+          stat=ImageStat.Stat(inner)
           mean=sum(stat.mean)/3
-          extrema=im.getextrema()
+          extrema=inner.getextrema()
           spread=max(hi-lo for lo,hi in extrema)
-          print(f'{mean:.3f} {spread} {im.width}x{im.height}')
+          nonblack=sum(1 for p in inner.resize((160,90)).getdata() if max(p) > 12)
+          total=160*90
+          ratio=nonblack/total
+          print(f'{mean:.3f} {spread} {ratio:.6f} {w}x{h}')
           PY
           )"
-            echo "frame[$i] $METRICS"
+            echo "viewport[$i] mean/spread/nonblack=$METRICS"
             MEAN="$(awk '{print $1}' <<<"$METRICS")"
             SPREAD="$(awk '{print $2}' <<<"$METRICS")"
-            if awk -v m="$MEAN" -v s="$SPREAD" 'BEGIN { exit !(m > 2.0 || s > 12) }'; then
+            RATIO="$(awk '{print $3}' <<<"$METRICS")"
+            cp /tmp/recroom-proof/recroom-frame.jpg /tmp/recroom-proof/recroom-last-frame.jpg
+            if awk -v m="$MEAN" -v s="$SPREAD" -v r="$RATIO" 'BEGIN { exit !(m > 2.0 && s > 12 && r > 0.005) }'; then
               VISUAL=1
               cp /tmp/recroom-proof/recroom-frame.jpg /tmp/recroom-proof/recroom-gameplay-proof.jpg
+              echo 'RECROOM_VISIBLE_RENDERING=true'
               break
             fi
             sleep 5
           done
-          test "$VISUAL" = '1'
-          echo 'RECROOM_VISIBLE_RENDERING=true'
+          echo "RECROOM_VISUAL_RESULT=$VISUAL"
 
-          # Audio is a continuous Ogg/Opus stream. A short read should yield an
-          # Ogg header even if the game happens to be silent at this exact moment.
+          # Test audio independently even if the viewport is still black, so a
+          # single session tells us both remaining runtime failures.
           set +e
-          curl -sS --max-time 4 \
-            "${STREAM_BASE}audio.ogg?token=$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$STREAM_TOKEN")" \
+          curl -sS --max-time 15 -D /tmp/recroom-proof/audio-headers.txt \
+            "${STREAM_BASE}audio.ogg?token=${TOKEN_Q}" \
             -o /tmp/recroom-proof/audio.ogg
+          AUDIO_CURL=$?
           set -e
-          test -s /tmp/recroom-proof/audio.ogg
-          python - <<'PY'
+          AUDIO_BYTES="$(stat -c '%s' /tmp/recroom-proof/audio.ogg 2>/dev/null || echo 0)"
+          echo "RECROOM_AUDIO_CURL_EXIT=$AUDIO_CURL"
+          echo "RECROOM_AUDIO_BYTES=$AUDIO_BYTES"
+          cat /tmp/recroom-proof/audio-headers.txt 2>/dev/null || true
+          AUDIO=0
+          if [ "$AUDIO_BYTES" -gt 0 ]; then
+            if python - <<'PY'
           data=open('/tmp/recroom-proof/audio.ogg','rb').read(64)
-          assert data.startswith(b'OggS'), data[:16]
+          raise SystemExit(0 if data.startswith(b'OggS') else 1)
           PY
-          echo 'RECROOM_AUDIO_STREAM_READY=true'
+            then
+              AUDIO=1
+              echo 'RECROOM_AUDIO_STREAM_READY=true'
+            fi
+          fi
+          echo "RECROOM_AUDIO_RESULT=$AUDIO"
+
+          test "$VISUAL" = '1'
+          test "$AUDIO" = '1'
           echo 'RECROOM_GAMEPLAY_E2E=true'
 
       - name: Upload gameplay proof
@@ -171,7 +193,10 @@ jobs:
           name: recroom-live-gameplay-proof
           path: |
             /tmp/recroom-proof/recroom-gameplay-proof.jpg
+            /tmp/recroom-proof/recroom-last-frame.jpg
             /tmp/recroom-proof/recroom-frame.jpg
             /tmp/recroom-proof/input.json
+            /tmp/recroom-proof/audio-headers.txt
+            /tmp/recroom-proof/audio.ogg
           if-no-files-found: ignore
           retention-days: 1
