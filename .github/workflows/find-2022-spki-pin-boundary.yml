@@ -1,0 +1,61 @@
+name: Find 2022 SPKI pin boundary
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/find-2022-spki-pin-boundary.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - date: '2022-04-15T06-50-51Z'
+            build_id: '8538723'
+            manifest: '5074805288827523797'
+          - date: '2022-04-08T06-52-23Z'
+            build_id: '8504784'
+            manifest: '3300297416944352195'
+          - date: '2022-03-30T06-50-13Z'
+            build_id: '8442185'
+            manifest: '4860694567153974568'
+          - date: '2022-03-23T06-55-51Z'
+            build_id: '8400677'
+            manifest: '6498111350645449747'
+          - date: '2022-03-16T06-50-34Z'
+            build_id: '8357630'
+            manifest: '461647593765554581'
+          - date: '2022-03-09T08-50-14Z'
+            build_id: '8318552'
+            manifest: '3630672705004706929'
+    steps:
+      - name: Scan exact metadata for RecNet SPKI pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://archive.recagain.site/${{ matrix.build.date }}/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat"
+          curl -fsSL --retry 3 --max-time 120 "$url" -o global-metadata.dat
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          b=Path('global-metadata.dat').read_bytes()
+          p1=bytes.fromhex('a7461e4bd2d01f98d5ff780d6eb6b2662384d38cbc4c50835d8977a3e90f13e0')
+          p2=bytes.fromhex('cb80e833e6da1db731cfd19041d739b3a8fbb1da89a96bd46246b80e8ffa0053')
+          c1,c2=b.count(p1),b.count(p2)
+          print('BUILD_DATE=${{ matrix.build.date }}')
+          print('BUILD_ID=${{ matrix.build.build_id }}')
+          print('MANIFEST=${{ matrix.build.manifest }}')
+          print('METADATA_SIZE=',len(b))
+          print('METADATA_SHA256=',hashlib.sha256(b).hexdigest())
+          print('PIN1_COUNT=',c1)
+          print('PIN2_COUNT=',c2)
+          print('LEGACY_NS_COUNT=',b.count(b'https://ns.rec.net/?v=2'))
+          print('PIN_MATERIAL=' + ('PRESENT' if c1 or c2 else 'ABSENT'))
+          PY
