@@ -1,0 +1,46 @@
+name: Resolve May 2022 RecNet Verifier Xrefs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/resolve-may2022-recnet-verifier-xrefs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Download exact GameAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+      - name: Resolve verifier calls and RecNet wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          objdump -d -Mintel GameAssembly.dll > /tmp/all.asm
+
+          echo '===== ALL XREFS: HTTPRequest set_CustomCertificateVerifyer (VA 0x180575bd0) ====='
+          grep -n -B24 -A30 -E 'call[[:space:]]+.*180575bd0' /tmp/all.asm | head -1200 || true
+
+          echo '===== ALL XREFS: HTTPRequest get_CustomCertificateVerifyer (VA 0x180574250) ====='
+          grep -n -B18 -A28 -E 'call[[:space:]]+.*180574250' /tmp/all.asm | head -800 || true
+
+          echo '===== RECNET WRAPPER 0x182b6ff00..0x182b70700 ====='
+          objdump -d -Mintel --start-address=0x182b6ff00 --stop-address=0x182b70700 GameAssembly.dll
+
+          echo '===== DIRECT +0xe0 MEMORY ACCESSES IN RECNET WRAPPER ====='
+          objdump -d -Mintel --start-address=0x182b6f000 --stop-address=0x182b82000 GameAssembly.dll | grep -n -B8 -A12 -E '\+0xe0\]|\+e0\]|0xe0\]' | head -800 || true
+
+          echo '===== AlwaysValidVerifyer IsValid candidate VA 0x180577ca0 ====='
+          objdump -d -Mintel --start-address=0x180577c70 --stop-address=0x180577d20 GameAssembly.dll
+
+          echo '===== HTTPRequest constructors around real RVAs 0x2e21450..0x2e22030 ====='
+          objdump -d -Mintel --start-address=0x182e21420 --stop-address=0x182e22120 GameAssembly.dll | head -1800
