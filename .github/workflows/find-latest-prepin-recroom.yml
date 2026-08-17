@@ -47,27 +47,33 @@ jobs:
           git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git dumper
           dotnet build dumper/Il2CppDumper/Il2CppDumper.csproj -c Release -f net7.0 >/dev/null || dotnet build dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
           exe=$(find dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1)
-          mkdir out
+          mkdir -p out
           cp GameAssembly.dll global-metadata.dat out/
-          cd out
-          DOTNET_ROLL_FORWARD=Major dotnet "$GITHUB_WORKSPACE/$exe" GameAssembly.dll global-metadata.dat || true
-          test -s script.json
+          set +e
+          (cd out && DOTNET_ROLL_FORWARD=Major dotnet "$GITHUB_WORKSPACE/$exe" GameAssembly.dll global-metadata.dat)
+          rc=$?
+          set -e
+          echo "Il2CppDumper exit=$rc (the CI ReadKey exit crash is expected after outputs are written)"
+          find "$GITHUB_WORKSPACE" -name script.json -o -name dump.cs | sort
+          script=$(find "$GITHUB_WORKSPACE" -name script.json -type f | head -1)
+          test -n "$script"
+          if [ "$script" != "$GITHUB_WORKSPACE/out/script.json" ]; then cp "$script" "$GITHUB_WORKSPACE/out/script.json"; fi
+          test -s "$GITHUB_WORKSPACE/out/script.json"
 
       - name: Resolve custom verifier setter xrefs
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m pip install -q pefile capstone
+          python3 -m pip install -q pefile
           python3 - <<'PY'
           import json, pefile, struct
-          from capstone import Cs, CS_ARCH_X86, CS_MODE_64
           s=json.load(open('out/script.json'))
-          methods=s.get('ScriptMethod',[]) or s.get('Methods',[]) or []
+          methods=s.get('ScriptMethod',[]) or []
           target=None
           for m in methods:
               name=str(m.get('Name',''))
-              if 'BestHTTP.HTTPRequest$$set_CustomCertificateVerifyer' in name or 'BestHTTP.HTTPRequest.set_CustomCertificateVerifyer' in name:
-                  target=int(m.get('Address',m.get('address',0)))
+              if 'BestHTTP.HTTPRequest$$set_CustomCertificateVerifyer' in name:
+                  target=int(m.get('Address',0))
                   print('SETTER_METHOD=',name)
                   print('SETTER_VA=0x%x'%target)
                   break
@@ -75,7 +81,6 @@ jobs:
               raise SystemExit('setter not found')
           pe=pefile.PE('GameAssembly.dll')
           base=pe.OPTIONAL_HEADER.ImageBase
-          data=open('GameAssembly.dll','rb').read()
           xrefs=[]
           for sec in pe.sections:
               if not (sec.Characteristics & 0x20000000):
@@ -84,11 +89,9 @@ jobs:
               for i in range(len(raw)-5):
                   if raw[i] != 0xE8: continue
                   rel=struct.unpack_from('<i',raw,i+1)[0]
-                  dest=va+i+5+rel
-                  if dest==target:
+                  if va+i+5+rel==target:
                       xrefs.append(va+i)
           print('DIRECT_SETTER_XREF_COUNT=',len(xrefs))
-          for x in xrefs:
-              print('SETTER_XREF_VA=0x%x'%x)
+          for x in xrefs: print('SETTER_XREF_VA=0x%x'%x)
           print('RESULT=' + ('CUSTOM_VERIFIER_PRESENT' if xrefs else 'NO_DIRECT_CUSTOM_VERIFIER_SETTER_XREF'))
           PY
