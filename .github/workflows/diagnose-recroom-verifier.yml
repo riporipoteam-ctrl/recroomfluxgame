@@ -2,6 +2,10 @@ name: Diagnose Rec Room TLS verifier
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-recroom-verifier.yml'
 
 permissions:
   contents: read
