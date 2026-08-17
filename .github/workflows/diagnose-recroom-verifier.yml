@@ -36,10 +36,13 @@ jobs:
         run: |
           set -euo pipefail
           git clone --depth 1 --branch v6.7.46 https://github.com/Perfare/Il2CppDumper.git /tmp/Il2CppDumper
+          sed -i '/Console.ReadKey/d' /tmp/Il2CppDumper/Il2CppDumper/Program.cs
           dotnet build /tmp/Il2CppDumper/Il2CppDumper/Il2CppDumper.csproj -c Release --nologo
           mkdir -p out
           DLL=$(find /tmp/Il2CppDumper/Il2CppDumper/bin/Release -path '*/net7.0/Il2CppDumper.dll' | head -1)
           DOTNET_ROLL_FORWARD=Major dotnet "$DLL" "$GITHUB_WORKSPACE/GameAssembly.dll" "$GITHUB_WORKSPACE/global-metadata.dat" "$GITHUB_WORKSPACE/out"
+          test -s out/dump.cs
+          test -s out/script.json
           find out -maxdepth 2 -type f -printf '%p %s bytes\n' | sort
 
       - name: Resolve verifier types and RecNet method
