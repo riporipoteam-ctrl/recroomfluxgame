@@ -1,0 +1,176 @@
+name: Decompile May 2022 Nameserver Methods
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/decompile-may2022-nameserver-methods.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Download exact build 8751857 IL2CPP inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://archive.recagain.site/2022-05-19T06-50-09Z'
+          curl -fsSL --connect-timeout 15 --max-time 300 -A 'RipoTeam-May2022-IL2CPP/1.0' "$base/GameAssembly.dll" -o GameAssembly.dll
+          curl -fsSL --connect-timeout 15 --max-time 300 -A 'RipoTeam-May2022-IL2CPP/1.0' "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o global-metadata.dat
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+          test "$(sha256sum global-metadata.dat | cut -d' ' -f1)" = 'd77f3728ba1f3765941f90de036f6b283301c156db3d7e31932e56c9b06a9b0c'
+
+      - name: Run Il2CppDumper
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --connect-timeout 15 --max-time 120 \
+            'https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net6-v6.7.46.zip' -o dumper.zip
+          mkdir dumper out
+          unzip -q dumper.zip -d dumper
+          dll="$(find dumper -type f -name 'Il2CppDumper.dll' | head -1)"
+          set +e
+          dotnet "$dll" "$PWD/GameAssembly.dll" "$PWD/global-metadata.dat" "$PWD/out" >il2cppdumper.log 2>&1
+          set -e
+          test -s out/dump.cs
+          test -s out/script.json
+
+      - name: Recover full FGCLJJMGLAI class and native methods
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pefile capstone
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, re
+          import pefile
+          from capstone import Cs, CS_ARCH_X86, CS_MODE_64
+
+          dump = Path('out/dump.cs').read_text(errors='replace').splitlines()
+          cls_pat = re.compile(r'\bclass\s+FGCLJJMGLAI\b')
+          start = next(i for i,l in enumerate(dump) if cls_pat.search(l))
+          # Grab the complete class using brace depth.
+          depth = 0
+          seen_open = False
+          end = start
+          for i in range(start, len(dump)):
+              line = dump[i]
+              depth += line.count('{')
+              if line.count('{'):
+                  seen_open = True
+              depth -= line.count('}')
+              end = i
+              if seen_open and depth <= 0:
+                  break
+          class_lines = dump[max(0,start-8):min(len(dump),end+8)]
+          class_text = '\n'.join(f'{i+1}: {dump[i]}' for i in range(max(0,start-8), min(len(dump),end+8)))
+          Path('fgcljjmglai-full-class.txt').write_text(class_text, encoding='utf-8')
+
+          # Parse // RVA: 0x... Offset: 0x... VA: 0x... followed by a method declaration.
+          methods = []
+          meta_pat = re.compile(r'RVA:\s*0x([0-9A-Fa-f]+)\s+Offset:\s*0x([0-9A-Fa-f]+)\s+VA:\s*0x([0-9A-Fa-f]+)')
+          for i in range(start, end+1):
+              m = meta_pat.search(dump[i])
+              if not m:
+                  continue
+              decl = dump[i+1].strip() if i+1 < len(dump) else ''
+              methods.append({
+                  'line': i+2,
+                  'rva': int(m.group(1),16),
+                  'offset': int(m.group(2),16),
+                  'va': int(m.group(3),16),
+                  'decl': decl,
+              })
+
+          # Also find nested generated callback class methods anywhere in dump.
+          wanted_names = ['PIPCAIJJNLK', 'ConnectionRequestCallback', 'TrySetServiceUri']
+          for i,line in enumerate(dump):
+              if not any(name in line for name in wanted_names):
+                  continue
+              for back in range(i, max(-1,i-5), -1):
+                  m = meta_pat.search(dump[back])
+                  if m:
+                      decl = dump[back+1].strip() if back+1 < len(dump) else line.strip()
+                      entry = {'line': back+2,'rva':int(m.group(1),16),'offset':int(m.group(2),16),'va':int(m.group(3),16),'decl':decl}
+                      if entry not in methods:
+                          methods.append(entry)
+                      break
+
+          pe = pefile.PE('GameAssembly.dll')
+          image_base = pe.OPTIONAL_HEADER.ImageBase
+          image = Path('GameAssembly.dll').read_bytes()
+          md = Cs(CS_ARCH_X86, CS_MODE_64)
+          md.detail = False
+
+          report = []
+          report.append('===== FULL FGCLJJMGLAI DECLARATION =====')
+          report.append(class_text)
+          report.append('\n===== TARGET METHOD TABLE =====')
+          for item in sorted(methods, key=lambda x:x['rva']):
+              report.append(f"RVA=0x{item['rva']:X} OFFSET=0x{item['offset']:X} VA=0x{item['va']:X} {item['decl']}")
+
+          report.append('\n===== NATIVE DISASSEMBLY =====')
+          for item in sorted(methods, key=lambda x:x['rva']):
+              decl = item['decl']
+              if not any(name in decl for name in wanted_names):
+                  continue
+              rva = item['rva']
+              try:
+                  off = pe.get_offset_from_rva(rva)
+              except Exception:
+                  off = item['offset']
+              # Disassemble a generous window. Stop on int3 padding after at least 32 instructions.
+              blob = image[off:off+0x900]
+              report.append(f"\n--- {decl} ---\nRVA 0x{rva:X} file 0x{off:X}")
+              count = 0
+              int3_run = 0
+              for ins in md.disasm(blob, image_base+rva):
+                  report.append(f"0x{ins.address:X}: {ins.mnemonic:<8} {ins.op_str}")
+                  count += 1
+                  if ins.mnemonic == 'int3':
+                      int3_run += 1
+                      if count > 32 and int3_run >= 4:
+                          break
+                  else:
+                      int3_run = 0
+                  if count >= 550:
+                      break
+
+          # Pull useful nearby managed declarations mentioning URI/service assignment.
+          report.append('\n===== URI / SERVICE DECLARATION CONTEXT =====')
+          uri_pat = re.compile(r'(?i)(TrySetServiceUri|ConnectionRequestCallback|System\.Uri|NameServerResponse|RecNetStatus|PlatformNotifications|Matchmaking|Accounts|Rooms|Auth|Discovery)')
+          hits = [i for i,l in enumerate(dump) if uri_pat.search(l)]
+          emitted=[]
+          for i in hits:
+              lo=max(0,i-5); hi=min(len(dump),i+8)
+              key=(lo,hi)
+              if any(lo <= b and hi >= a for a,b in emitted):
+                  continue
+              emitted.append(key)
+              report.append(f'\n--- dump.cs {lo+1}-{hi} ---')
+              report.extend(f'{j+1}: {dump[j]}' for j in range(lo,hi))
+              if len(report) > 13000:
+                  break
+
+          text='\n'.join(report)
+          Path('nameserver-method-analysis.txt').write_text(text,encoding='utf-8')
+          print(text[:220000])
+          PY
+
+      - name: Upload nameserver method analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: may2022-nameserver-method-analysis
+          path: |
+            nameserver-method-analysis.txt
+            fgcljjmglai-full-class.txt
+          retention-days: 3
