@@ -1,0 +1,94 @@
+name: Scan May 2022 Endpoint Findings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/scan-may2022-endpoints-compact.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download endpoint-bearing files
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://archive.recagain.site/2022-05-19T06-50-09Z'
+          mkdir -p /tmp/rr/RecRoom_Data/il2cpp_data/Metadata
+          curl -fsSL --connect-timeout 15 --max-time 240 -A 'RipoTeam-May2022-EndpointScan/1.0' "$base/GameAssembly.dll" -o /tmp/rr/GameAssembly.dll
+          curl -fsSL --connect-timeout 15 --max-time 240 -A 'RipoTeam-May2022-EndpointScan/1.0' "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o /tmp/rr/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat
+          curl -fsSL --connect-timeout 15 --max-time 240 -A 'RipoTeam-May2022-EndpointScan/1.0' "$base/RecRoom_Data/globalgamemanagers" -o /tmp/rr/RecRoom_Data/globalgamemanagers
+          curl -fsSL --connect-timeout 15 --max-time 240 -A 'RipoTeam-May2022-EndpointScan/1.0' "$base/RecRoom_Data/globalgamemanagers.assets" -o /tmp/rr/RecRoom_Data/globalgamemanagers.assets
+
+      - name: Write compact endpoint findings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, json
+
+          files=[p for p in Path('/tmp/rr').rglob('*') if p.is_file()]
+          rows=[]
+          contexts=[]
+          interesting_domains=set()
+          keyword_strings=set()
+
+          ascii_re=re.compile(rb'[\x20-\x7e]{5,700}')
+          domain_re=re.compile(r'(?i)(?:(?:https?|wss?)://)?(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+(?:net|com|io|gg|app|cloud)(?::\d{2,5})?(?:/[^\s\x00"\'<>]{0,260})?')
+          keywords=('rec.net','recroom','api','auth','account','room','match','photon','econ','commerce','leader','discovery','notify','player','settings','websocket','server')
+
+          def consume(rel, offset, enc, s):
+              clean=' '.join(s.split())
+              low=clean.lower()
+              for m in domain_re.finditer(clean):
+                  d=m.group(0).strip('.,);]')
+                  if len(d) <= 360:
+                      interesting_domains.add(d)
+                      rows.append((rel,offset,enc,d))
+              if any(k in low for k in keywords):
+                  if len(clean) <= 500:
+                      keyword_strings.add(clean)
+                  if ('rec.net' in low or 'recroom' in low or 'http' in low or 'photon' in low or 'match' in low) and len(clean)<=650:
+                      contexts.append((rel,offset,enc,clean))
+
+          for p in files:
+              data=p.read_bytes(); rel=str(p.relative_to('/tmp/rr'))
+              for m in ascii_re.finditer(data):
+                  consume(rel,m.start(),'ascii',m.group().decode('ascii','ignore'))
+              for shift in (0,1):
+                  text=data[shift:].decode('utf-16le','ignore')
+                  for m in re.finditer(r'[ -~]{5,700}',text):
+                      consume(rel,shift+m.start()*2,'utf16le',m.group())
+
+          out=[]
+          out.append('=== UNIQUE DOMAIN/URL STRINGS ===')
+          for d in sorted(interesting_domains): out.append(d)
+          out.append('\n=== DOMAIN LOCATIONS ===')
+          for rel,off,enc,d in sorted(set(rows), key=lambda x:(x[0],x[1],x[3]))[:2500]:
+              out.append(f'{rel}\t0x{off:x}\t{enc}\t{d}')
+          out.append('\n=== HIGH-SIGNAL CONTEXTS ===')
+          for rel,off,enc,s in sorted(set(contexts), key=lambda x:(x[0],x[1]))[:2500]:
+              out.append(f'{rel}\t0x{off:x}\t{enc}\t{s}')
+          out.append('\n=== KEYWORD STRINGS (FILTERED) ===')
+          for s in sorted(keyword_strings):
+              low=s.lower()
+              if any(x in low for x in ('rec.net','recroom','http','photon','matchmak','api.','auth.','account.','rooms.','econ.','commerce.','leader','discovery','notify')):
+                  out.append(s)
+          Path('endpoint-findings.txt').write_text('\n'.join(out),encoding='utf-8')
+          print('\n'.join(out[:700]))
+          print(f'FINDING_LINES={len(out)} DOMAINS={len(interesting_domains)} CONTEXTS={len(contexts)}')
+          PY
+
+      - name: Upload compact findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: may2022-endpoint-findings
+          path: endpoint-findings.txt
+          retention-days: 3
