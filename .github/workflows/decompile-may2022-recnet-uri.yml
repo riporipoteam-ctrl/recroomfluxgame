@@ -1,0 +1,118 @@
+name: Trace May 2022 RecNet URI Construction
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/decompile-may2022-recnet-uri.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Fetch exact build 8751857 IL2CPP inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://archive.recagain.site/2022-05-19T06-50-09Z'
+          curl -fsSL --max-time 300 "$base/GameAssembly.dll" -o GameAssembly.dll
+          curl -fsSL --max-time 300 "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o global-metadata.dat
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+          test "$(sha256sum global-metadata.dat | cut -d' ' -f1)" = 'd77f3728ba1f3765941f90de036f6b283301c156db3d7e31932e56c9b06a9b0c'
+
+      - name: Run Il2CppDumper and inspect URI-related metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 120 'https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net6-v6.7.46.zip' -o dumper.zip
+          mkdir dumper out
+          unzip -q dumper.zip -d dumper
+          dll="$(find dumper -type f -name 'Il2CppDumper.dll' | head -1)"
+          dotnet "$dll" "$PWD/GameAssembly.dll" "$PWD/global-metadata.dat" "$PWD/out" >il2cppdumper.log 2>&1 || true
+          test -s out/dump.cs
+
+          echo '===== output files =====' > uri-trace.txt
+          find out -maxdepth 1 -type f -printf '%f %s\n' | sort >> uri-trace.txt
+          echo >> uri-trace.txt
+          echo '===== PE sections =====' >> uri-trace.txt
+          objdump -h GameAssembly.dll >> uri-trace.txt
+
+          echo >> uri-trace.txt
+          echo '===== PIPCAIJJNLK VA 0x1828F71C0 =====' >> uri-trace.txt
+          objdump -d -Mintel --start-address=0x1828f7100 --stop-address=0x1828f7500 GameAssembly.dll >> uri-trace.txt 2>&1 || true
+          echo >> uri-trace.txt
+          echo '===== FGCLJJMGLAI .cctor VA 0x1828F7550 =====' >> uri-trace.txt
+          objdump -d -Mintel --start-address=0x1828f7500 --stop-address=0x1828f7900 GameAssembly.dll >> uri-trace.txt 2>&1 || true
+          echo >> uri-trace.txt
+          echo '===== JEAFKJDDEMF URI validator VA 0x1828F4160 =====' >> uri-trace.txt
+          objdump -d -Mintel --start-address=0x1828f4100 --stop-address=0x1828f4380 GameAssembly.dll >> uri-trace.txt 2>&1 || true
+          echo >> uri-trace.txt
+          echo '===== FIAPNOOAONN service URI getter VA 0x1828F2D00 =====' >> uri-trace.txt
+          objdump -d -Mintel --start-address=0x1828f2c80 --stop-address=0x1828f2e20 GameAssembly.dll >> uri-trace.txt 2>&1 || true
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, re
+          report=Path('uri-trace.txt')
+          with report.open('a',encoding='utf-8') as out:
+              out.write('\n===== dump.cs exact FGCL fields/methods =====\n')
+              lines=Path('out/dump.cs').read_text(errors='replace').splitlines()
+              for i,line in enumerate(lines):
+                  if 'class FGCLJJMGLAI' in line:
+                      for j in range(i,min(len(lines),i+420)):
+                          if any(x in lines[j] for x in ['JFGDCAJMHAK','NJLGACINJBH','CNEEHNDCLCG','PIPCAIJJNLK','JEAFKJDDEMF','FIAPNOOAONN','.cctor','ConnectionRequestCallback','ConnectToRecNet']):
+                              out.write(f'{j+1}: {lines[j]}\n')
+                      break
+
+              out.write('\n===== string literal / script references =====\n')
+              needles=['https://ns.rec.net/?v=2','Connecting to RecNet','Invalid URI scheme','RecNet name server query failed']
+              for filename in ['stringliteral.json','script.json']:
+                  p=Path('out')/filename
+                  out.write(f'-- {filename} exists={p.exists()} size={p.stat().st_size if p.exists() else 0} --\n')
+                  if not p.exists():
+                      continue
+                  text=p.read_text(errors='replace')
+                  for needle in needles:
+                      pos=text.find(needle)
+                      out.write(f'{needle!r} pos={pos}\n')
+                      if pos>=0:
+                          out.write(text[max(0,pos-500):pos+1000]+'\n')
+
+              out.write('\n===== raw metadata contexts =====\n')
+              data=Path('global-metadata.dat').read_bytes()
+              for needle in [n.encode() for n in needles]:
+                  start=0
+                  while True:
+                      pos=data.find(needle,start)
+                      if pos<0: break
+                      chunk=data[max(0,pos-300):min(len(data),pos+len(needle)+500)]
+                      printable=''.join(chr(b) if 32<=b<127 else '.' for b in chunk)
+                      out.write(f'{needle!r} @0x{pos:x}: {printable}\n')
+                      start=pos+1
+          PY
+
+          # Also search native strings for URI validation wording and schemes.
+          echo >> uri-trace.txt
+          echo '===== native URI/scheme strings =====' >> uri-trace.txt
+          strings -a -n 4 GameAssembly.dll | grep -Ei 'Invalid URI scheme|URI scheme|https?://|WebSocket|file://' | head -n 800 >> uri-trace.txt || true
+
+      - name: Upload URI trace
+        uses: actions/upload-artifact@v4
+        with:
+          name: may2022-recnet-uri-trace
+          path: |
+            uri-trace.txt
+            out/stringliteral.json
+            out/script.json
+            il2cppdumper.log
+          if-no-files-found: ignore
+          retention-days: 3
