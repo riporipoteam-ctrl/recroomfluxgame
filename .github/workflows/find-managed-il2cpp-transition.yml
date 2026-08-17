@@ -1,0 +1,54 @@
+name: Find 2020 managed IL2CPP transition
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/find-managed-il2cpp-transition.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - date: '2020-04-02T06-51-01Z'
+            build_id: '4830506'
+          - date: '2020-04-08T06-56-55Z'
+            build_id: '4857256'
+          - date: '2020-04-20T07-32-18Z'
+            build_id: '4912996'
+          - date: '2020-04-30T07-03-10Z'
+            build_id: '4942098'
+          - date: '2020-05-04T07-10-23Z'
+            build_id: '4969267'
+          - date: '2020-05-13T07-01-18Z'
+            build_id: '4998330'
+          - date: '2020-05-19T07-00-42Z'
+            build_id: '5031114'
+    steps:
+      - name: Probe archive scripting layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://archive.recagain.site/${{ matrix.build.date }}"
+          managed=$(curl -sS --max-time 30 -o /tmp/managed.dll -w '%{http_code}' "$base/RecRoom_Data/Managed/Assembly-CSharp.dll" || true)
+          il2cpp=$(curl -sS --max-time 30 -o /tmp/meta.dat -w '%{http_code}' "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" || true)
+          echo "BUILD_DATE=${{ matrix.build.date }}"
+          echo "BUILD_ID=${{ matrix.build.build_id }}"
+          echo "MANAGED_HTTP=$managed"
+          echo "IL2CPP_HTTP=$il2cpp"
+          if [ "$managed" = 200 ]; then
+            echo "MANAGED_SIZE=$(stat -c%s /tmp/managed.dll)"
+            sha256sum /tmp/managed.dll
+            strings -a /tmp/managed.dll | grep -E -i 'ns\.rec\.net|CertificateVerify|ICertificateVerify|AlwaysValid|BestHTTP' | head -80 || true
+          fi
+          if [ "$il2cpp" = 200 ]; then
+            echo "IL2CPP_SIZE=$(stat -c%s /tmp/meta.dat)"
+            sha256sum /tmp/meta.dat
+          fi
