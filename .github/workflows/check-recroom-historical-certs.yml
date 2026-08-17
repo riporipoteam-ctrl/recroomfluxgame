@@ -15,57 +15,41 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Query certificate transparency and compare SPKI pins
+      - name: Query Cert Spotter and compare SPKI pins
         shell: bash
         env:
           PIN1: a7461e4bd2d01f98d5ff780d6eb6b2662384d38cbc4c50835d8977a3e90f13e0
           PIN2: cb80e833e6da1db731cfd19041d739b3a8fbb1da89a96bd46246b80e8ffa0053
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 --max-time 45 'https://crt.sh/?q=ns.rec.net&output=json' -o ct.json
-          python3 - <<'PY' > candidates.txt
-          import json, datetime
+          curl -fsSL --retry 3 --max-time 45 'https://api.certspotter.com/v1/issuances?domain=ns.rec.net&include_subdomains=false&expand=dns_names&expand=issuer&expand=cert_der' -o ct.json
+          python3 - <<'PY'
+          import json, datetime, base64, subprocess, tempfile, pathlib, os
           rows=json.load(open('ct.json'))
+          print('CT_ROWS=',len(rows))
           target=datetime.datetime(2022,5,19,tzinfo=datetime.timezone.utc)
-          seen=set()
+          pins={os.environ['PIN1'].lower(),os.environ['PIN2'].lower()}
+          matches=0; active=0
+          def dt(s):
+              if not s:return None
+              s=s.replace('Z','+00:00')
+              return datetime.datetime.fromisoformat(s)
           for r in rows:
-              names=(r.get('name_value') or '')+'\n'+(r.get('common_name') or '')
-              if 'ns.rec.net' not in names and '*.rec.net' not in names:
-                  continue
-              def dt(s):
-                  if not s: return None
-                  s=s.replace('T',' ')
-                  try: return datetime.datetime.fromisoformat(s).replace(tzinfo=datetime.timezone.utc)
-                  except: return None
               nb,na=dt(r.get('not_before')),dt(r.get('not_after'))
-              if nb and na and nb <= target <= na:
-                  i=str(r['id'])
-                  if i not in seen:
-                      seen.add(i); print(i)
-          print('#COUNT='+str(len(seen)), file=__import__('sys').stderr)
+              if not (nb and na and nb <= target <= na):
+                  continue
+              active+=1
+              der=base64.b64decode(r['cert_der'])
+              with tempfile.TemporaryDirectory() as td:
+                  p=pathlib.Path(td)/'c.der'; p.write_bytes(der)
+                  pem=subprocess.check_output(['openssl','x509','-inform','DER','-in',str(p),'-pubkey','-noout'])
+                  q=subprocess.Popen(['openssl','pkey','-pubin','-outform','DER'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+                  pub,_=q.communicate(pem)
+                  import hashlib
+                  h=hashlib.sha256(pub).hexdigest()
+              print('CERT',r.get('id'),'not_before',r.get('not_before'),'not_after',r.get('not_after'),'issuer',r.get('issuer',{}).get('name'),'SPKI',h)
+              if h in pins:
+                  matches+=1; print('*** PIN MATCH ***')
+          print('ACTIVE_ON_2022_05_19=',active)
+          print('PIN_MATCHES=',matches)
           PY
-          echo 'Historical cert IDs active on 2022-05-19:'
-          cat candidates.txt
-          matches=0
-          while read -r id; do
-            [ -n "$id" ] || continue
-            curl -fsSL --retry 2 --max-time 20 "https://crt.sh/?d=$id" -o cert.der || continue
-            if ! openssl x509 -inform DER -in cert.der -noout >/dev/null 2>&1; then
-              # crt.sh can return PEM
-              cp cert.der cert.pem
-              fmt=''
-            else
-              openssl x509 -inform DER -in cert.der -out cert.pem
-            fi
-            echo "===== CT_ID=$id ====="
-            openssl x509 -in cert.pem -noout -subject -issuer -dates -serial || true
-            hex=$(openssl x509 -in cert.pem -pubkey -noout | openssl pkey -pubin -outform DER 2>/dev/null | openssl dgst -sha256 | sed 's/^.*= //')
-            b64=$(openssl x509 -in cert.pem -pubkey -noout | openssl pkey -pubin -outform DER 2>/dev/null | openssl dgst -sha256 -binary | base64)
-            echo "SPKI_HEX=$hex"
-            echo "SPKI_B64=$b64"
-            if [ "$hex" = "$PIN1" ] || [ "$hex" = "$PIN2" ]; then
-              echo '*** PIN MATCH ***'
-              matches=$((matches+1))
-            fi
-          done < candidates.txt
-          echo "PIN_MATCHES=$matches"
