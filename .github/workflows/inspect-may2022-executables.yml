@@ -1,0 +1,33 @@
+name: Inspect May 2022 Executables
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/inspect-may2022-executables.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Download and identify both exact-build executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://archive.recagain.site/2022-05-19T06-50-09Z'
+          curl -fsSL --max-time 60 "$base/RecRoom.exe" -o RecRoom.exe
+          curl -fsSL --max-time 60 "$base/Recroom_Release.exe" -o Recroom_Release.exe
+          sha256sum RecRoom.exe Recroom_Release.exe
+          file RecRoom.exe Recroom_Release.exe
+          for f in RecRoom.exe Recroom_Release.exe; do
+            echo "===== $f IMPORTS ====="
+            objdump -p "$f" 2>/dev/null | grep -E 'DLL Name|Subsystem|ImageBase|SizeOfImage|Entry' | head -100 || true
+            echo "===== $f HIGH SIGNAL STRINGS ====="
+            strings -el "$f" | grep -Ei 'Unity|EasyAnti|Anti.Cheat|Rec Room|RecRoom|GameAssembly|UnityPlayer|steam|bootstrap|launcher|mono|il2cpp|crash|EOS' | head -160 || true
+            strings -a "$f" | grep -Ei 'Unity|EasyAnti|Anti.Cheat|Rec Room|RecRoom|GameAssembly|UnityPlayer|steam|bootstrap|launcher|mono|il2cpp|crash|EOS' | head -160 || true
+          done
