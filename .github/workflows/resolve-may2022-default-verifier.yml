@@ -1,0 +1,36 @@
+name: Resolve May 2022 Default TLS Verifier
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/resolve-may2022-default-verifier.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Download exact GameAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+      - name: Resolve HTTPManager verifier initialization
+        shell: bash
+        run: |
+          set -euo pipefail
+          objdump -d -Mintel --start-address=0x182e1b0d0 --stop-address=0x182e1b7a0 GameAssembly.dll > /tmp/cctor.txt
+          echo '===== FULL CCTOR ====='
+          cat /tmp/cctor.txt
+          echo '===== REFERENCES TO AlwaysValidVerifyer TypeInfo (VA 0x18776e128) ====='
+          grep -i -B8 -A16 '18776e128' /tmp/cctor.txt || true
+          echo '===== REFERENCES TO HTTPManager TypeInfo (VA 0x187770a90) ====='
+          grep -i -B4 -A12 '187770a90' /tmp/cctor.txt || true
+          echo '===== getter ====='
+          objdump -d -Mintel --start-address=0x182e1b7a0 --stop-address=0x182e1b850 GameAssembly.dll
