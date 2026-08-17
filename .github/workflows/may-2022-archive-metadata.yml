@@ -1,0 +1,135 @@
+name: May 2022 Archive Metadata Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/may-2022-archive-metadata.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Read May 19 2022 archive page metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://archive.recagain.site/2022-05-19T06-50-09Z'
+          mkdir -p /tmp/recagain-meta
+          curl --fail --silent --show-error --location \
+            --max-filesize 5242880 \
+            --connect-timeout 15 --max-time 60 \
+            -A 'RipoTeam-BuildIdentityProbe/1.0' \
+            -D /tmp/recagain-meta/headers.txt \
+            -o /tmp/recagain-meta/page.html \
+            "$URL"
+          echo '--- response headers ---'
+          sed -n '1,30p' /tmp/recagain-meta/headers.txt
+          echo '--- page bytes ---'
+          wc -c /tmp/recagain-meta/page.html
+
+      - name: Extract build identity, text links and candidate metadata endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          from urllib.parse import urljoin, urlparse
+          import json, re
+
+          base = 'https://archive.recagain.site/2022-05-19T06-50-09Z'
+          text = Path('/tmp/recagain-meta/page.html').read_text('utf-8', errors='replace')
+
+          class P(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.links=[]; self.scripts=[]
+              def handle_starttag(self, tag, attrs):
+                  a=dict(attrs)
+                  if tag=='a' and a.get('href'): self.links.append((a.get('href'), a.get('download')))
+                  if tag=='script' and a.get('src'): self.scripts.append(a.get('src'))
+          p=P(); p.feed(text)
+
+          print('TARGET_BUILD_ID=8751857')
+          print('TARGET_MANIFEST_ID=6337851004861751095')
+          print('TARGET_DEPOT_ID=471711')
+          print('TARGET_BUILD_DATE=2022-05-19T06-50-09Z')
+          print('contains_build_id=', '8751857' in text)
+          print('contains_manifest_id=', '6337851004861751095' in text)
+
+          urls=[]
+          for href, download in p.links:
+              absolute=urljoin(base, href)
+              urls.append(absolute)
+              lowered=absolute.lower()
+              if any(k in lowered for k in ('api','json','manifest','database','file','download','torrent','metadata')) or download is not None:
+                  print('CANDIDATE_LINK', absolute, 'download=' + str(download))
+          for src in p.scripts:
+              print('SCRIPT', urljoin(base, src))
+
+          # Surface inline framework data and obvious API paths without fetching binaries.
+          patterns = [
+              r'https://[^\"\'<> ]+',
+              r'/api/[^\"\'<> ]+',
+              r'/[^\"\'<> ]*(?:manifest|metadata|files|download|database)[^\"\'<> ]*',
+          ]
+          found=set()
+          for pat in patterns:
+              for value in re.findall(pat, text, flags=re.I):
+                  if len(value) < 500:
+                      found.add(value.replace('&amp;', '&'))
+          for value in sorted(found):
+              print('INLINE_CANDIDATE', value)
+
+          Path('/tmp/recagain-meta/links.json').write_text(json.dumps(sorted(set(urls)), indent=2))
+          PY
+
+      - name: Inspect same-origin text metadata candidates only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          links=json.loads(Path('/tmp/recagain-meta/links.json').read_text())
+          chosen=[]
+          for u in links:
+              p=urlparse(u)
+              if p.hostname != 'archive.recagain.site':
+                  continue
+              low=p.path.lower()
+              if any(k in low for k in ('api','json','manifest','metadata','database')):
+                  chosen.append(u)
+          for i,u in enumerate(chosen[:12]):
+              out=f'/tmp/recagain-meta/candidate-{i}.txt'
+              cmd=['curl','--fail','--silent','--show-error','--location','--max-filesize','2097152','--connect-timeout','10','--max-time','30','-A','RipoTeam-BuildIdentityProbe/1.0','-o',out,u]
+              print('FETCH_TEXT_CANDIDATE', u)
+              try:
+                  subprocess.run(cmd, check=True)
+              except subprocess.CalledProcessError as e:
+                  print('candidate_fetch_failed=', e.returncode)
+                  continue
+              data=Path(out).read_bytes()
+              if b'\x00' in data[:4096]:
+                  print('candidate_rejected_binary bytes=', len(data))
+                  Path(out).unlink(missing_ok=True)
+                  continue
+              text=data.decode('utf-8','replace')
+              print(text[:12000])
+          PY
+
+      - name: Summarize known archive identity
+        shell: bash
+        run: |
+          echo 'May 19 2022 Under Construction A'
+          echo 'Build ID: 8751857'
+          echo 'Manifest ID: 6337851004861751095'
+          echo 'Depot: 471711'
+          echo 'This workflow intentionally does not download or upload the proprietary Rec Room client.'
