@@ -1,0 +1,35 @@
+name: Probe May 12 trusted public bootstrap
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/probe-may12-public-bootstrap.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Wait for public bootstrap and validate loopback payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-bootstrap/ns?ip=127.0.0.1'
+          for i in $(seq 1 100); do
+            code=$(curl -sS --max-time 15 -o /tmp/ns.json -w '%{http_code}' "$URL" || true)
+            echo "probe[$i] http=$code"
+            if [ "$code" = 200 ] && jq -e . /tmp/ns.json >/dev/null 2>&1; then
+              jq . /tmp/ns.json
+              if jq -e '.. | strings | select(test("^https?://")) | select(startswith("http://127.0.0.1:81"))' /tmp/ns.json >/dev/null && ! grep -Eqi 'bearer|accessToken|sessionAccessToken' /tmp/ns.json; then
+                echo 'TRUSTED_BOOTSTRAP_LOOPBACK_ONLY=true'
+                exit 0
+              fi
+            fi
+            sleep 4
+          done
+          echo '::error::Trusted public bootstrap did not become valid.'
+          exit 1
