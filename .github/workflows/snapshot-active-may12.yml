@@ -1,0 +1,22 @@
+name: Snapshot active May 12 launch
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/snapshot-active-may12.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Read active May 12 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 20 'https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/capabilities' -o /tmp/cap.json
+          jq '{targetBuild,targetManifest,exactBuild,readyForGame,runningSandboxes,recNetRedirectPatch,recNetTransport,lastGraphicsFailure}' /tmp/cap.json
