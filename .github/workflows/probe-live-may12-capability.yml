@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Poll exact May 12 client and transport
+      - name: Poll exact May 12 client and trusted transport
         shell: bash
         run: |
           set -euo pipefail
@@ -26,16 +26,18 @@ jobs:
             transport=$(jq -r '.recNetTransport // empty' /tmp/cap.json 2>/dev/null || true)
             exact=$(jq -r '.exactBuild // false' /tmp/cap.json 2>/dev/null || true)
             fp=$(jq -r '.checks.fingerprint // false' /tmp/cap.json 2>/dev/null || true)
+            public=$(jq -r '.recNetPublicBootstrap // false' /tmp/cap.json 2>/dev/null || true)
+            bypass=$(jq -r '.recNetTlsVerificationBypassed // false' /tmp/cap.json 2>/dev/null || true)
             reason=$(jq -r '.reason // empty' /tmp/cap.json 2>/dev/null || true)
-            echo "probe[$i] http=$code build=$build manifest=$manifest transport=$transport exact=$exact fingerprint=$fp reason=$reason"
-            if [ "$code" = 200 ] && [ "$build" = '8715820' ] && [ "$manifest" = '2586133705164702202' ] && [ "$transport" = 'https-local-tls12-prepin-v1' ] && [ "$exact" = true ] && [ "$fp" = true ]; then
+            echo "probe[$i] http=$code build=$build manifest=$manifest transport=$transport exact=$exact fingerprint=$fp public=$public bypass=$bypass reason=$reason"
+            if [ "$code" = 200 ] && [ "$build" = '8715820' ] && [ "$manifest" = '2586133705164702202' ] && [ "$transport" = 'trusted-public-https-bootstrap-local-http-may12-v1' ] && [ "$exact" = true ] && [ "$fp" = true ] && [ "$public" = true ] && [ "$bypass" = false ]; then
               jq . /tmp/cap.json
-              echo 'MAY12_EXACT_BUILD_LIVE=true'
+              echo 'MAY12_TRUSTED_TRANSPORT_LIVE=true'
               exit 0
             fi
             sleep 4
           done
           echo '===== LAST CAPABILITY ====='
           cat /tmp/cap.json || true
-          echo '::error::Exact May 12 client did not become ready.'
+          echo '::error::Trusted May 12 transport did not become ready.'
           exit 1
