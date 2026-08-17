@@ -1,0 +1,78 @@
+name: Inspect legacy Rec Room ZIP layout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/inspect-legacy-archive-zip.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        date:
+          - '2020-04-08T06-56-55Z'
+          - '2020-03-27T06-58-55Z'
+          - '2019-12-19T21-30-25Z'
+    steps:
+      - name: Read ZIP central directory with HTTP ranges
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import urllib.request, struct, re
+          date='${{ matrix.date }}'
+          url=f'https://archive.recagain.site/download/{date}'
+          print('DATE=',date)
+          req=urllib.request.Request(url,method='HEAD',headers={'User-Agent':'RipoTeam-archive-layout/1.0'})
+          try:
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  print('HEAD_STATUS=',r.status)
+                  print('CONTENT_LENGTH=',r.headers.get('Content-Length'))
+                  print('ACCEPT_RANGES=',r.headers.get('Accept-Ranges'))
+          except Exception as e:
+              print('HEAD_ERROR=',repr(e))
+          # Request the last 4 MiB; enough to include EOCD and usually central directory.
+          req=urllib.request.Request(url,headers={'Range':'bytes=-4194304','User-Agent':'RipoTeam-archive-layout/1.0'})
+          with urllib.request.urlopen(req,timeout=90) as r:
+              tail=r.read()
+              cr=r.headers.get('Content-Range')
+              print('RANGE_STATUS=',r.status,'BYTES=',len(tail),'CONTENT_RANGE=',cr)
+          pos=tail.rfind(b'PK\x05\x06')
+          if pos<0:
+              raise SystemExit('EOCD not found in tail')
+          eocd=tail[pos:pos+22]
+          sig,disk,cd_disk,n_disk,n_total,cd_size,cd_off,comment_len=struct.unpack('<IHHHHIIH',eocd)
+          print('CENTRAL_COUNT=',n_total,'CENTRAL_SIZE=',cd_size,'CENTRAL_OFFSET=',cd_off)
+          # Get total object size from Content-Range: bytes start-end/total
+          m=re.search(r'/([0-9]+)$',cr or '')
+          total=int(m.group(1)) if m else None
+          if total is None:
+              raise SystemExit('could not resolve ZIP total size')
+          tail_start=total-len(tail)
+          if cd_off >= tail_start and cd_off+cd_size <= total:
+              cd=tail[cd_off-tail_start:cd_off-tail_start+cd_size]
+          else:
+              req=urllib.request.Request(url,headers={'Range':f'bytes={cd_off}-{cd_off+cd_size-1}','User-Agent':'RipoTeam-archive-layout/1.0'})
+              with urllib.request.urlopen(req,timeout=90) as r:
+                  cd=r.read()
+          names=[]; p=0
+          while p+46<=len(cd):
+              if cd[p:p+4]!=b'PK\x01\x02': break
+              vals=struct.unpack_from('<IHHHHHHIIIHHHHHII',cd,p)
+              fnlen,exlen,comlen=vals[10],vals[11],vals[12]
+              name=cd[p+46:p+46+fnlen].decode('utf-8','replace')
+              names.append(name)
+              p += 46+fnlen+exlen+comlen
+          print('PARSED_NAMES=',len(names))
+          for n in names:
+              low=n.lower()
+              if ('assembly-csharp' in low or '/managed/' in low or 'recroom' in low and low.endswith('.exe') or 'gameassembly' in low or 'metadata' in low):
+                  print('MATCH_PATH=',n)
+          PY
