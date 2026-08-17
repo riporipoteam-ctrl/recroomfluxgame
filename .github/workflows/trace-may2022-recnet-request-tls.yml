@@ -1,0 +1,35 @@
+name: Trace May 2022 RecNet Request TLS Settings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/trace-may2022-recnet-request-tls.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Download exact GameAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+      - name: Trace RecNet request construction and TLS fields
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '===== JMAANPPEBJE ctor with callback RVA 0x2b701c0 ====='
+          objdump -d -Mintel --start-address=0x182b70180 --stop-address=0x182b703c0 GameAssembly.dll
+          echo '===== JMAANPPEBJE ctor no callback RVA 0x2b703c0 ====='
+          objdump -d -Mintel --start-address=0x182b703c0 --stop-address=0x182b70620 GameAssembly.dll
+          echo '===== ConnectToRecNet callback vicinity RVA 0x290a7e0 ====='
+          objdump -d -Mintel --start-address=0x18290a700 --stop-address=0x18290aa20 GameAssembly.dll
+          echo '===== all direct writes/calls around HTTPRequest custom verifier field/setter in RecNet wrapper range ====='
+          objdump -d -Mintel --start-address=0x182b6f800 --stop-address=0x182b81200 GameAssembly.dll | grep -E -B6 -A10 '0xe0|180575bd0|18776e128' || true
