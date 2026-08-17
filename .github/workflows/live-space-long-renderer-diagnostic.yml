@@ -1,0 +1,147 @@
+name: Live Space Long Rec Room Renderer Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/live-space-long-renderer-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SPACE_URL: https://echoxr-ripoteam-cloud-pc.hf.space
+  FIREBASE_API_KEY: AIzaSyBV_ev8AVpKwgioPSSWiBYf8UU09bLbWOU
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Run full live renderer matrix and preserve server diagnosis
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rr-long
+          SESSION_ID=''
+          ACCESS_TOKEN=''
+          FIREBASE_TOKEN=''
+          TERMINAL='0'
+          RESULT='timeout'
+
+          cleanup() {
+            set +e
+            if [ -n "$SESSION_ID" ] && [ -n "$ACCESS_TOKEN" ]; then
+              curl -fsS --max-time 20 -X POST \
+                "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/release?accessToken=$ACCESS_TOKEN" \
+                -o /tmp/rr-long/release.json || true
+              echo '--- release ---'
+              cat /tmp/rr-long/release.json 2>/dev/null || true
+            fi
+            if [ -n "$FIREBASE_TOKEN" ]; then
+              curl -fsS --max-time 20 -X POST \
+                "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$FIREBASE_API_KEY" \
+                -H 'content-type: application/json' \
+                --data "$(jq -cn --arg t "$FIREBASE_TOKEN" '{idToken:$t}')" \
+                -o /tmp/rr-long/firebase-delete.json || true
+            fi
+          }
+          trap cleanup EXIT
+
+          echo 'Creating disposable Flux identity...'
+          TEST_EMAIL="recroom-long-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}@example.com"
+          TEST_PASSWORD="Rr!$(openssl rand -hex 18)"
+          AUTH_BODY="$(jq -cn --arg email "$TEST_EMAIL" --arg password "$TEST_PASSWORD" \
+            '{email:$email,password:$password,returnSecureToken:true}')"
+          AUTH_CODE="$(curl -sS --max-time 30 -o /tmp/rr-long/firebase-auth.json -w '%{http_code}' \
+            -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" \
+            -H 'content-type: application/json' --data "$AUTH_BODY")"
+          test "$AUTH_CODE" = '200'
+          FIREBASE_TOKEN="$(jq -r '.idToken // empty' /tmp/rr-long/firebase-auth.json)"
+          test -n "$FIREBASE_TOKEN"
+
+          echo 'Allocating exact May 19 2022 session...'
+          CREATE_CODE="$(curl -sS --max-time 45 -o /tmp/rr-long/session-create.json -w '%{http_code}' \
+            -X POST "$SPACE_URL/api/recroom-public/sessions" \
+            -H "authorization: Bearer $FIREBASE_TOKEN" \
+            -H 'content-type: application/json' \
+            --data '{"buildId":"recroom-2022-05-19"}')"
+          jq '{ok,sessionId,state,hostId,provider,phase,progress,error}' /tmp/rr-long/session-create.json
+          test "$CREATE_CODE" = '202'
+          SESSION_ID="$(jq -r '.sessionId // empty' /tmp/rr-long/session-create.json)"
+          ACCESS_TOKEN="$(jq -r '.sessionAccessToken // .accessToken // empty' /tmp/rr-long/session-create.json)"
+          test -n "$SESSION_ID"
+          test -n "$ACCESS_TOKEN"
+
+          echo 'Polling until the complete renderer matrix reaches ready or failed...'
+          for i in $(seq 1 170); do
+            curl -fsS --max-time 20 \
+              "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID?accessToken=$ACCESS_TOKEN" \
+              -o /tmp/rr-long/session-status.json
+            STATE="$(jq -r '.state // empty' /tmp/rr-long/session-status.json)"
+            PHASE="$(jq -r '.phase // empty' /tmp/rr-long/session-status.json)"
+            PROGRESS="$(jq -r '.progress // 0' /tmp/rr-long/session-status.json)"
+            echo "launch[$i] state=$STATE phase=$PHASE progress=$PROGRESS"
+            if [ "$STATE" = 'ready' ]; then
+              TERMINAL='1'
+              RESULT='ready'
+              break
+            fi
+            if [ "$STATE" = 'failed' ]; then
+              TERMINAL='1'
+              RESULT='failed'
+              break
+            fi
+            sleep 4
+          done
+
+          echo '--- final session status ---'
+          jq '{sessionId,state,provider,phase,progress,streamUrl,error}' /tmp/rr-long/session-status.json || true
+
+          echo '--- persistent live capability diagnosis ---'
+          curl -fsS --max-time 30 -H 'Cache-Control: no-cache' \
+            "$SPACE_URL/api/recroom-wine/capabilities?ts=$(date +%s)" \
+            -o /tmp/rr-long/capabilities.json
+          jq '{readyForGame,exactBuild,blackViewportPatch,failureDiagnosticsPatch,lastGraphicsFailure}' \
+            /tmp/rr-long/capabilities.json
+
+          if [ "$RESULT" = 'ready' ]; then
+            echo 'Renderer matrix produced a ready session; requesting proof frame...'
+            CAP_CODE="$(curl -sS --max-time 30 -o /tmp/rr-long/capture-create.json -w '%{http_code}' \
+              -X POST "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures?accessToken=$ACCESS_TOKEN")"
+            if [ "$CAP_CODE" = '202' ]; then
+              CAPTURE_ID="$(jq -r '.captureId // empty' /tmp/rr-long/capture-create.json)"
+              for i in $(seq 1 30); do
+                curl -fsS --max-time 20 \
+                  "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures/$CAPTURE_ID?accessToken=$ACCESS_TOKEN" \
+                  -o /tmp/rr-long/capture-status.json
+                CAP_STATE="$(jq -r '.state // empty' /tmp/rr-long/capture-status.json)"
+                if [ "$CAP_STATE" = 'ready' ]; then
+                  curl -fsS --max-time 30 \
+                    "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures/$CAPTURE_ID/image?accessToken=$ACCESS_TOKEN" \
+                    -o /tmp/rr-long/recroom-live.jpg
+                  break
+                fi
+                [ "$CAP_STATE" = 'failed' ] && break
+                sleep 2
+              done
+            fi
+          fi
+
+          echo "FULL_RENDERER_RESULT=$RESULT"
+          test "$TERMINAL" = '1'
+          test "$RESULT" = 'ready'
+
+      - name: Upload renderer diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-recroom-renderer-diagnosis
+          path: |
+            /tmp/rr-long/session-create.json
+            /tmp/rr-long/session-status.json
+            /tmp/rr-long/capabilities.json
+            /tmp/rr-long/recroom-live.jpg
+          if-no-files-found: ignore
+          retention-days: 2
