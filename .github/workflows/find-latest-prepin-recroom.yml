@@ -1,0 +1,94 @@
+name: Find latest pre-pin Rec Room build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/find-latest-prepin-recroom.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - date: '2022-05-12T06-50-19Z'
+            build_id: '8715820'
+            manifest: '2586133705164702202'
+          - date: '2022-04-28T06-50-43Z'
+            build_id: '8628560'
+            manifest: '7515621376213891010'
+          - date: '2022-04-21T06-50-40Z'
+            build_id: '8567561'
+            manifest: '3357294209222359997'
+    steps:
+      - name: Download exact archived IL2CPP files
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://archive.recagain.site/${{ matrix.build.date }}"
+          curl -fsSL --retry 3 --max-time 240 "$base/GameAssembly.dll" -o GameAssembly.dll
+          curl -fsSL --retry 3 --max-time 120 "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o global-metadata.dat
+          echo "BUILD_DATE=${{ matrix.build.date }}"
+          echo "BUILD_ID=${{ matrix.build.build_id }}"
+          echo "MANIFEST=${{ matrix.build.manifest }}"
+          sha256sum GameAssembly.dll global-metadata.dat
+
+      - name: Dump IL2CPP metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git dumper
+          dotnet build dumper/Il2CppDumper/Il2CppDumper.csproj -c Release -f net7.0 >/dev/null || dotnet build dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
+          exe=$(find dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1)
+          mkdir out
+          cp GameAssembly.dll global-metadata.dat out/
+          cd out
+          DOTNET_ROLL_FORWARD=Major dotnet "$GITHUB_WORKSPACE/$exe" GameAssembly.dll global-metadata.dat || true
+          test -s script.json
+
+      - name: Resolve custom verifier setter xrefs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install -q pefile capstone
+          python3 - <<'PY'
+          import json, pefile, struct
+          from capstone import Cs, CS_ARCH_X86, CS_MODE_64
+          s=json.load(open('out/script.json'))
+          methods=s.get('ScriptMethod',[]) or s.get('Methods',[]) or []
+          target=None
+          for m in methods:
+              name=str(m.get('Name',''))
+              if 'BestHTTP.HTTPRequest$$set_CustomCertificateVerifyer' in name or 'BestHTTP.HTTPRequest.set_CustomCertificateVerifyer' in name:
+                  target=int(m.get('Address',m.get('address',0)))
+                  print('SETTER_METHOD=',name)
+                  print('SETTER_VA=0x%x'%target)
+                  break
+          if not target:
+              raise SystemExit('setter not found')
+          pe=pefile.PE('GameAssembly.dll')
+          base=pe.OPTIONAL_HEADER.ImageBase
+          data=open('GameAssembly.dll','rb').read()
+          xrefs=[]
+          for sec in pe.sections:
+              if not (sec.Characteristics & 0x20000000):
+                  continue
+              raw=sec.get_data(); va=base+sec.VirtualAddress
+              for i in range(len(raw)-5):
+                  if raw[i] != 0xE8: continue
+                  rel=struct.unpack_from('<i',raw,i+1)[0]
+                  dest=va+i+5+rel
+                  if dest==target:
+                      xrefs.append(va+i)
+          print('DIRECT_SETTER_XREF_COUNT=',len(xrefs))
+          for x in xrefs:
+              print('SETTER_XREF_VA=0x%x'%x)
+          print('RESULT=' + ('CUSTOM_VERIFIER_PRESENT' if xrefs else 'NO_DIRECT_CUSTOM_VERIFIER_SETTER_XREF'))
+          PY
