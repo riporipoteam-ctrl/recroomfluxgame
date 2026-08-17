@@ -1,41 +1,66 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(scriptDir, "..");
 const root = path.resolve(process.argv[2] || process.env.FLUX_RECROOM_CLIENT_DIR || "client");
+const fingerprintPath = path.join(projectRoot, "config", "recroom-may-2022-fingerprint.json");
+const fingerprint = JSON.parse(fs.readFileSync(fingerprintPath, "utf8"));
 
-function firstExisting(names) {
-  for (const name of names) {
-    const candidate = path.join(root, name);
-    if (fs.existsSync(candidate)) return candidate;
+function sha256File(filePath) {
+  const hash = crypto.createHash("sha256");
+  const fd = fs.openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(4 * 1024 * 1024);
+  try {
+    while (true) {
+      const bytes = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (!bytes) break;
+      hash.update(buffer.subarray(0, bytes));
+    }
+  } finally {
+    fs.closeSync(fd);
   }
-  return null;
+  return hash.digest("hex");
 }
 
-const exe = firstExisting(["RecRoom.exe", "Recroom_Release.exe"]);
-const gameAssembly = firstExisting(["GameAssembly.dll"]);
-const dataDir = firstExisting(["RecRoom_Data", "Recroom_Release_Data"]);
-const metadata = dataDir ? path.join(dataDir, "il2cpp_data", "Metadata", "global-metadata.dat") : null;
+console.log("Flux Rec Room exact-client verification");
+console.log(`Target: ${fingerprint.buildDate} | build ${fingerprint.buildId} | manifest ${fingerprint.manifestId}`);
+console.log(`Archive inventory: ${fingerprint.fileCount.toLocaleString()} files | ${fingerprint.totalBytes.toLocaleString()} bytes\n`);
 
-const checks = [
-  ["client directory", fs.existsSync(root), root],
-  ["Rec Room executable", Boolean(exe), exe || "RecRoom.exe / Recroom_Release.exe"],
-  ["IL2CPP GameAssembly.dll", Boolean(gameAssembly), gameAssembly || "GameAssembly.dll"],
-  ["Unity data directory", Boolean(dataDir), dataDir || "RecRoom_Data"],
-  ["IL2CPP metadata", Boolean(metadata && fs.existsSync(metadata)), metadata || "global-metadata.dat"],
-];
-
-console.log("Flux Rec Room 2022 client verification");
-console.log("Target: 2022-05-19 | build 8751857 | manifest 6337851004861751095\n");
-for (const [label, ok, detail] of checks) console.log(`${ok ? "OK " : "FAIL"} ${label}: ${detail}`);
-
-const failed = checks.filter(([, ok]) => !ok);
-if (failed.length) {
-  console.error(`\nClient layout is incomplete (${failed.length} checks failed).`);
+if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+  console.error(`FAIL client directory: ${root}`);
   process.exit(1);
 }
 
-const exeSize = fs.statSync(exe).size;
-const assemblySize = fs.statSync(gameAssembly).size;
-console.log(`\nExecutable bytes: ${exeSize.toLocaleString()}`);
-console.log(`GameAssembly bytes: ${assemblySize.toLocaleString()}`);
-console.log("Layout is suitable for URL/protocol discovery. This does not by itself prove the exact Steam build identity.");
+let failed = 0;
+for (const [label, expected] of Object.entries(fingerprint.criticalFiles)) {
+  const filePath = path.join(root, ...expected.path.split("/"));
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    console.error(`FAIL ${label}: missing ${expected.path}`);
+    failed += 1;
+    continue;
+  }
+  const stat = fs.statSync(filePath);
+  if (stat.size !== expected.size) {
+    console.error(`FAIL ${label}: size ${stat.size} != ${expected.size}`);
+    failed += 1;
+    continue;
+  }
+  const actualHash = sha256File(filePath);
+  if (actualHash !== expected.sha256) {
+    console.error(`FAIL ${label}: sha256 ${actualHash} != ${expected.sha256}`);
+    failed += 1;
+    continue;
+  }
+  console.log(`OK   ${label}: ${expected.path} | ${stat.size.toLocaleString()} bytes | ${actualHash}`);
+}
+
+if (failed) {
+  console.error(`\nClient is NOT build ${fingerprint.buildId} (${failed} critical fingerprint check(s) failed).`);
+  process.exit(1);
+}
+
+console.log(`\nEXACT_BUILD_OK=true`);
+console.log(`Build ${fingerprint.buildId} / manifest ${fingerprint.manifestId} fingerprint matches all pinned critical files.`);
