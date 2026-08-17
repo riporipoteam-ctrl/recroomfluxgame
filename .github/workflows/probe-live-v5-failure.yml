@@ -1,0 +1,41 @@
+name: Probe Live V5 RecNet Failure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/probe-live-v5-failure.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Read preserved V5 failure snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 30 -H 'Cache-Control: no-cache' \
+            "https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/capabilities?ts=$(date +%s)" \
+            -o /tmp/cap.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/cap.json'))
+          f=p.get('lastGraphicsFailure') or {}
+          out={
+            'transport':p.get('recNetTransport'),
+            'redirectPatch':p.get('recNetRedirectPatch'),
+            'exactBuild':p.get('exactBuild'),
+            'recNet':f.get('recNet'),
+            'renderProfile':f.get('renderProfile'),
+            'renderMetrics':f.get('renderMetrics'),
+            'fatalWindow':f.get('fatalWindow'),
+            'profiles':f.get('profiles'),
+            'error':f.get('error'),
+          }
+          print(json.dumps(out, indent=2))
+          PY
