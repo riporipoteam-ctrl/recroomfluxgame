@@ -1,0 +1,42 @@
+name: Trace May 2022 BestHTTP Scheme Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/decompile-may2022-besthttp-scheme.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Fetch exact GameAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+
+      - name: Disassemble BestHTTP request constructor
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '===== JMAANPPEBJE ctor VA 0x182B703C0 ====='
+            objdump -d -Mintel --start-address=0x182b70380 --stop-address=0x182b70b80 GameAssembly.dll
+            echo
+            echo '===== nearby URI helpers ====='
+            objdump -d -Mintel --start-address=0x182b6f700 --stop-address=0x182b70600 GameAssembly.dll
+          } > besthttp-scheme.txt 2>&1
+
+      - name: Upload scheme trace
+        uses: actions/upload-artifact@v4
+        with:
+          name: may2022-besthttp-scheme-trace
+          path: besthttp-scheme.txt
+          retention-days: 3
