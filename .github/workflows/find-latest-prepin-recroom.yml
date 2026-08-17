@@ -54,7 +54,6 @@ jobs:
           rc=$?
           set -e
           echo "Il2CppDumper exit=$rc (the CI ReadKey exit crash is expected after outputs are written)"
-          find "$GITHUB_WORKSPACE" -name script.json -o -name dump.cs | sort
           script=$(find "$GITHUB_WORKSPACE" -name script.json -type f | head -1)
           test -n "$script"
           if [ "$script" != "$GITHUB_WORKSPACE/out/script.json" ]; then cp "$script" "$GITHUB_WORKSPACE/out/script.json"; fi
@@ -68,29 +67,22 @@ jobs:
           python3 - <<'PY'
           import json, pefile, struct
           s=json.load(open('out/script.json'))
-          methods=s.get('ScriptMethod',[]) or []
           target=None
-          for m in methods:
+          for m in s.get('ScriptMethod',[]):
               name=str(m.get('Name',''))
               if 'BestHTTP.HTTPRequest$$set_CustomCertificateVerifyer' in name:
-                  target=int(m.get('Address',0))
-                  print('SETTER_METHOD=',name)
-                  print('SETTER_VA=0x%x'%target)
-                  break
-          if not target:
-              raise SystemExit('setter not found')
-          pe=pefile.PE('GameAssembly.dll')
-          base=pe.OPTIONAL_HEADER.ImageBase
-          xrefs=[]
+                  target=int(m.get('Address',0)); print('SETTER_METHOD=',name); print('SETTER_VA=0x%x'%target); break
+          if not target: raise SystemExit('setter not found')
+          pe=pefile.PE('GameAssembly.dll'); base=pe.OPTIONAL_HEADER.ImageBase; xrefs=[]
           for sec in pe.sections:
-              if not (sec.Characteristics & 0x20000000):
-                  continue
-              raw=sec.get_data(); va=base+sec.VirtualAddress
-              for i in range(len(raw)-5):
-                  if raw[i] != 0xE8: continue
+              if not (sec.Characteristics & 0x20000000): continue
+              raw=sec.get_data(); va=base+sec.VirtualAddress; pos=0
+              while True:
+                  i=raw.find(b'\xE8',pos)
+                  if i < 0 or i+5 > len(raw): break
                   rel=struct.unpack_from('<i',raw,i+1)[0]
-                  if va+i+5+rel==target:
-                      xrefs.append(va+i)
+                  if va+i+5+rel==target: xrefs.append(va+i)
+                  pos=i+1
           print('DIRECT_SETTER_XREF_COUNT=',len(xrefs))
           for x in xrefs: print('SETTER_XREF_VA=0x%x'%x)
           print('RESULT=' + ('CUSTOM_VERIFIER_PRESENT' if xrefs else 'NO_DIRECT_CUSTOM_VERIFIER_SETTER_XREF'))
