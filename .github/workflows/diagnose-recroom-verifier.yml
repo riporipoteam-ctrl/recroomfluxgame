@@ -14,6 +14,8 @@ jobs:
   diagnose:
     runs-on: ubuntu-24.04
     timeout-minutes: 12
+    env:
+      DOTNET_ROLL_FORWARD: Major
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -36,8 +38,8 @@ jobs:
           git clone --depth 1 --branch v6.7.46 https://github.com/Perfare/Il2CppDumper.git /tmp/Il2CppDumper
           dotnet build /tmp/Il2CppDumper/Il2CppDumper/Il2CppDumper.csproj -c Release --nologo
           mkdir -p out
-          DLL=$(find /tmp/Il2CppDumper/Il2CppDumper/bin/Release -name 'Il2CppDumper.dll' | head -1)
-          dotnet "$DLL" "$GITHUB_WORKSPACE/GameAssembly.dll" "$GITHUB_WORKSPACE/global-metadata.dat" "$GITHUB_WORKSPACE/out" || true
+          DLL=$(find /tmp/Il2CppDumper/Il2CppDumper/bin/Release -path '*/net7.0/Il2CppDumper.dll' | head -1)
+          DOTNET_ROLL_FORWARD=Major dotnet "$DLL" "$GITHUB_WORKSPACE/GameAssembly.dll" "$GITHUB_WORKSPACE/global-metadata.dat" "$GITHUB_WORKSPACE/out"
           find out -maxdepth 2 -type f -printf '%p %s bytes\n' | sort
 
       - name: Resolve verifier types and RecNet method
@@ -50,11 +52,7 @@ jobs:
           echo '===== Script entries around 0x182b6f000..0x182b71600 ====='
           python3 - <<'PY'
           import json, pathlib
-          p=pathlib.Path('out/script.json')
-          if not p.exists():
-              print('script.json missing')
-              raise SystemExit(0)
-          data=json.loads(p.read_text(errors='replace'))
+          data=json.loads(pathlib.Path('out/script.json').read_text(errors='replace'))
           lo=0x182b6f000; hi=0x182b71600
           def walk(x):
               if isinstance(x, dict):
