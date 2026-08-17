@@ -1,0 +1,47 @@
+name: Inspect VisualRec 2022 Protocol Reference
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/inspect-visualrec-2022-protocol.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Download and inspect public VisualRec 2022 server archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://raw.githubusercontent.com/essentialsasset/RecRoom-Live-Servers/main/VisualRec-2022.zip'
+          curl -fsSL --connect-timeout 20 --max-time 180 "$url" -o /tmp/visualrec.zip
+          mkdir -p /tmp/visualrec
+          unzip -q /tmp/visualrec.zip -d /tmp/visualrec
+          echo '===== TREE =====' > /tmp/visualrec-protocol.txt
+          find /tmp/visualrec -type f -printf '%P\n' | sort | head -1000 >> /tmp/visualrec-protocol.txt
+          echo >> /tmp/visualrec-protocol.txt
+          echo '===== NAMESERVER / SERVICE URL MATCHES =====' >> /tmp/visualrec-protocol.txt
+          grep -RInaE --binary-files=without-match \
+            'NameServer|nameserver|ns\.rec\.net|RecNetStatus|Matchmaking|Leaderboard|Notifications|PlatformNotifications|RoomComments|BugReporting|DataCollection|Discovery|Commerce|Accounts|Auth|https?://' \
+            /tmp/visualrec 2>/dev/null | head -12000 >> /tmp/visualrec-protocol.txt || true
+          echo >> /tmp/visualrec-protocol.txt
+          echo '===== ROUTE / LOGIN MATCHES =====' >> /tmp/visualrec-protocol.txt
+          grep -RInaE --binary-files=without-match \
+            'login|authenticate|auth|account|player|api/|route|Map(Get|Post|Put|Delete)|Http(Get|Post)|app\.(get|post|put|delete)|UseEndpoints|Controller|Route\(' \
+            /tmp/visualrec 2>/dev/null | head -12000 >> /tmp/visualrec-protocol.txt || true
+          echo '===== FILE TYPES =====' >> /tmp/visualrec-protocol.txt
+          find /tmp/visualrec -type f -print0 | xargs -0 file | head -2000 >> /tmp/visualrec-protocol.txt || true
+          sed -n '1,2400p' /tmp/visualrec-protocol.txt
+
+      - name: Upload compact protocol reference
+        uses: actions/upload-artifact@v4
+        with:
+          name: visualrec-2022-protocol-reference
+          path: /tmp/visualrec-protocol.txt
+          retention-days: 2
