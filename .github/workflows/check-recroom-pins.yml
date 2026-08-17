@@ -13,58 +13,35 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 4
+    env:
+      PIN1: a7461e4bd2d01f98d5ff780d6eb6b2662384d38cbc4c50835d8977a3e90f13e0
+      PIN2: cb80e833e6da1db731cfd19041d739b3a8fbb1da89a96bd46246b80e8ffa0053
     steps:
-      - name: Download exact May 19 2022 GameAssembly
+      - name: Compare reachable Rec Room TLS chains with May 2022 pins
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
-          echo '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27  GameAssembly.dll' | sha256sum -c -
-
-      - name: Extract embedded SPKI pins
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m pip install -q pefile
-          python3 - <<'PY'
-          import pefile
-          pe=pefile.PE('GameAssembly.dll')
-          base=pe.OPTIONAL_HEADER.ImageBase
-          for i,va in enumerate((0x18773f848,0x187740e98),1):
-              rva=va-base
-              off=pe.get_offset_from_rva(rva)
-              raw=pe.__data__[off:off+32]
-              print(f'PIN{i}_HEX={raw.hex()}')
-              import base64
-              print(f'PIN{i}_B64={base64.b64encode(raw).decode()}')
-          PY
-
-      - name: Inspect live ns.rec.net TLS chain and SPKI hashes
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -f cert-*.pem chain.pem
-          timeout 20 openssl s_client -connect ns.rec.net:443 -servername ns.rec.net -showcerts </dev/null 2>/tmp/sclient.err > /tmp/sclient.out || true
-          cat /tmp/sclient.err || true
-          awk '/BEGIN CERTIFICATE/{n++; f=sprintf("cert-%02d.pem",n)} f{print > f} /END CERTIFICATE/{close(f); f=""}' /tmp/sclient.out
-          count=0
-          for c in cert-*.pem; do
-            [ -f "$c" ] || continue
-            count=$((count+1))
-            echo "===== $c ====="
-            openssl x509 -in "$c" -noout -subject -issuer -dates -fingerprint -sha256
-            openssl x509 -in "$c" -pubkey -noout | openssl pkey -pubin -outform DER 2>/dev/null | openssl dgst -sha256 -binary | base64 | sed 's/^/SPKI_SHA256_B64=/'
-            openssl x509 -in "$c" -pubkey -noout | openssl pkey -pubin -outform DER 2>/dev/null | openssl dgst -sha256 | sed 's/^.*= /SPKI_SHA256_HEX=/'
+          total_matches=0
+          for host in rec.net accounts.rec.net auth.rec.net rooms.rec.net api.rec.net ns.rec.net; do
+            echo "========== HOST $host =========="
+            rm -f cert-*.pem /tmp/sclient.out /tmp/sclient.err
+            timeout 12 openssl s_client -connect "$host:443" -servername "$host" -showcerts </dev/null 2>/tmp/sclient.err > /tmp/sclient.out || true
+            tail -20 /tmp/sclient.err || true
+            awk '/BEGIN CERTIFICATE/{n++; f=sprintf("cert-%02d.pem",n)} f{print > f} /END CERTIFICATE/{close(f); f=""}' /tmp/sclient.out
+            count=0
+            for c in cert-*.pem; do
+              [ -f "$c" ] || continue
+              count=$((count+1))
+              echo "===== $host $c ====="
+              openssl x509 -in "$c" -noout -subject -issuer -dates || true
+              hex=$(openssl x509 -in "$c" -pubkey -noout | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print $1}')
+              echo "SPKI_HEX=$hex"
+              if [ "$hex" = "$PIN1" ] || [ "$hex" = "$PIN2" ]; then
+                echo '*** PIN MATCH ***'
+                total_matches=$((total_matches+1))
+              fi
+            done
+            echo "CHAIN_CERT_COUNT=$count"
           done
-          echo "CHAIN_CERT_COUNT=$count"
-
-      - name: Probe live nameserver response
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -vk --max-time 15 'https://ns.rec.net/?v=2' -o /tmp/ns.body 2>/tmp/ns.curl || true
-          cat /tmp/ns.curl | tail -80
-          echo '===== BODY ====='
-          head -c 4000 /tmp/ns.body || true
-          echo
+          echo "TOTAL_PIN_MATCHES=$total_matches"
