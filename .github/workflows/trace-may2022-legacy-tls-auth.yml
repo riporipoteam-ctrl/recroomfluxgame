@@ -1,0 +1,37 @@
+name: Trace May 2022 Legacy TLS Authentication
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/trace-may2022-legacy-tls-auth.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Download exact GameAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+      - name: Trace exact TLS auth and request verifier methods
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '===== LegacyTlsAuthentication ctor RVA 0x9092e0 ====='
+          objdump -d -Mintel --start-address=0x180909280 --stop-address=0x180909430 GameAssembly.dll
+          echo '===== LegacyTlsAuthentication NotifyServerCertificate RVA 0x28437f0 ====='
+          objdump -d -Mintel --start-address=0x182843780 --stop-address=0x1828439b0 GameAssembly.dll
+          echo '===== LegacyTlsClient ctor + GetAuthentication RVA 0x2843910/0x28439b0 ====='
+          objdump -d -Mintel --start-address=0x1828438d0 --stop-address=0x182843c80 GameAssembly.dll
+          echo '===== HTTPRequest get CustomCertificateVerifyer RVA 0x574250 ====='
+          objdump -d -Mintel --start-address=0x180574200 --stop-address=0x1805742b0 GameAssembly.dll
+          echo '===== HTTPRequest set CustomCertificateVerifyer RVA 0x575bd0 ====='
+          objdump -d -Mintel --start-address=0x180575b80 --stop-address=0x180575c40 GameAssembly.dll
