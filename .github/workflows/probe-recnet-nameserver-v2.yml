@@ -1,0 +1,48 @@
+name: Probe Legacy RecNet Nameserver V2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/probe-recnet-nameserver-v2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Read legacy nameserver response shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://ns.rec.net/?v=2'
+          code="$(curl -sS -L --connect-timeout 15 --max-time 45 \
+            -A 'RecRoom/2022 RipoTeam compatibility probe' \
+            -D /tmp/ns.headers -o /tmp/ns.body -w '%{http_code}' "$url" || true)"
+          echo "HTTP=$code"
+          echo '=== HEADERS ==='
+          sed -n '1,100p' /tmp/ns.headers || true
+          echo '=== BODY ==='
+          head -c 20000 /tmp/ns.body || true
+          echo
+          echo '=== JSON SHAPE ==='
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raw=Path('/tmp/ns.body').read_text(errors='replace') if Path('/tmp/ns.body').exists() else ''
+          try:
+              data=json.loads(raw)
+          except Exception as exc:
+              print('not-json:', type(exc).__name__, str(exc))
+          else:
+              def shape(v, depth=0):
+                  if depth>4: return type(v).__name__
+                  if isinstance(v,dict): return {k:shape(x,depth+1) for k,x in v.items()}
+                  if isinstance(v,list): return [shape(v[0],depth+1)] if v else []
+                  return type(v).__name__
+              print(json.dumps(shape(data),indent=2,sort_keys=True))
+          PY
