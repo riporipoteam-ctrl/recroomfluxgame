@@ -1,0 +1,52 @@
+name: Probe legacy managed Rec Room layout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/probe-legacy-managed-layout.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - date: '2020-04-08T06-56-55Z'
+            build_id: '4857256'
+          - date: '2020-03-27T06-58-55Z'
+            build_id: '4802887'
+          - date: '2019-12-19T21-30-25Z'
+            build_id: '4504243'
+    steps:
+      - name: Probe common legacy paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://archive.recagain.site/${{ matrix.build.date }}"
+          echo "BUILD_DATE=${{ matrix.build.date }} BUILD_ID=${{ matrix.build.build_id }}"
+          paths=(
+            'RecRoom_Data/Managed/Assembly-CSharp.dll'
+            'Recroom_Release_Data/Managed/Assembly-CSharp.dll'
+            'RecRoom_Release_Data/Managed/Assembly-CSharp.dll'
+            'recroom_release_Data/Managed/Assembly-CSharp.dll'
+            'Recroom_Data/Managed/Assembly-CSharp.dll'
+            'RecRoom.exe'
+            'Recroom_Release.exe'
+          )
+          for p in "${paths[@]}"; do
+            out="/tmp/$(echo "$p" | tr '/ ' '__')"
+            code=$(curl -sS --max-time 30 -o "$out" -w '%{http_code}' "$base/$p" || true)
+            size=0; [ -f "$out" ] && size=$(stat -c%s "$out" 2>/dev/null || echo 0)
+            echo "PATH=$p HTTP=$code SIZE=$size"
+            if [ "$code" = 200 ] && [[ "$p" == *Assembly-CSharp.dll ]]; then
+              sha256sum "$out"
+              echo '--- strings ---'
+              strings -a "$out" | grep -E -i 'ns\.rec\.net|CertificateVerify|ICertificateVerify|AlwaysValid|BestHTTP|RecNet' | head -120 || true
+            fi
+          done
