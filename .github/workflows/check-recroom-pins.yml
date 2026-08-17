@@ -18,22 +18,28 @@ jobs:
       PIN1: a7461e4bd2d01f98d5ff780d6eb6b2662384d38cbc4c50835d8977a3e90f13e0
       PIN2: cb80e833e6da1db731cfd19041d739b3a8fbb1da89a96bd46246b80e8ffa0053
     steps:
-      - name: Compare reachable Rec Room TLS chains with May 2022 pins
+      - name: Probe ns.rec.net with 2022-style TLS profiles
         shell: bash
         run: |
           set -euo pipefail
           total_matches=0
-          for host in rec.net accounts.rec.net auth.rec.net rooms.rec.net api.rec.net ns.rec.net; do
-            echo "========== HOST $host =========="
+          i=0
+          for args in \
+            '-tls1_2' \
+            '-tls1_2 -cipher DEFAULT:@SECLEVEL=0' \
+            '-tls1_2 -cipher ALL:@SECLEVEL=0' \
+            '-tls1_2 -cipher ECDHE-RSA-AES128-GCM-SHA256:@SECLEVEL=0' \
+            '-tls1_2 -cipher AES128-SHA:@SECLEVEL=0'; do
+            i=$((i+1))
+            echo "========== PROFILE $i: $args =========="
             rm -f cert-*.pem /tmp/sclient.out /tmp/sclient.err
-            timeout 12 openssl s_client -connect "$host:443" -servername "$host" -showcerts </dev/null 2>/tmp/sclient.err > /tmp/sclient.out || true
-            tail -20 /tmp/sclient.err || true
+            timeout 12 bash -c "openssl s_client -connect ns.rec.net:443 -servername ns.rec.net -showcerts $args </dev/null" 2>/tmp/sclient.err > /tmp/sclient.out || true
+            tail -30 /tmp/sclient.err || true
             awk '/BEGIN CERTIFICATE/{n++; f=sprintf("cert-%02d.pem",n)} f{print > f} /END CERTIFICATE/{close(f); f=""}' /tmp/sclient.out
             count=0
             for c in cert-*.pem; do
               [ -f "$c" ] || continue
               count=$((count+1))
-              echo "===== $host $c ====="
               openssl x509 -in "$c" -noout -subject -issuer -dates || true
               hex=$(openssl x509 -in "$c" -pubkey -noout | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print $1}')
               echo "SPKI_HEX=$hex"
@@ -45,3 +51,9 @@ jobs:
             echo "CHAIN_CERT_COUNT=$count"
           done
           echo "TOTAL_PIN_MATCHES=$total_matches"
+
+          echo '========== CURL TLS1.2 RESPONSE =========='
+          curl -vk --tlsv1.2 --tls-max 1.2 --max-time 12 'https://ns.rec.net/?v=2' -o /tmp/body 2>/tmp/curlerr || true
+          tail -60 /tmp/curlerr || true
+          [ -f /tmp/body ] && head -c 3000 /tmp/body || true
+          echo
