@@ -1,0 +1,89 @@
+name: Recover May 2022 Nameserver Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/decompile-may2022-nameserver.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Download exact May 2022 IL2CPP inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://archive.recagain.site/2022-05-19T06-50-09Z'
+          curl -fsSL --connect-timeout 15 --max-time 300 -A 'RipoTeam-May2022-IL2CPP/1.0' "$base/GameAssembly.dll" -o GameAssembly.dll
+          curl -fsSL --connect-timeout 15 --max-time 300 -A 'RipoTeam-May2022-IL2CPP/1.0' "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o global-metadata.dat
+          sha256sum GameAssembly.dll global-metadata.dat
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+          test "$(sha256sum global-metadata.dat | cut -d' ' -f1)" = 'd77f3728ba1f3765941f90de036f6b283301c156db3d7e31932e56c9b06a9b0c'
+
+      - name: Run Il2CppDumper
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --connect-timeout 15 --max-time 120 \
+            'https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net6-v6.7.46.zip' \
+            -o dumper.zip
+          mkdir dumper out
+          unzip -q dumper.zip -d dumper
+          echo '=== DUMPER FILES ==='
+          find dumper -maxdepth 2 -type f -printf '%p\n' | sort
+          dll="$(find dumper -type f -name 'Il2CppDumper.dll' | head -1)"
+          test -n "$dll"
+          dotnet "$dll" "$PWD/GameAssembly.dll" "$PWD/global-metadata.dat" "$PWD/out" | tee il2cppdumper.log
+          find out -maxdepth 2 -type f -printf '%p %s bytes\n' | sort | head -100
+
+      - name: Extract nameserver and service contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          roots=[Path('out'),Path('.')]
+          files=[]
+          for root in roots:
+              if root.exists():
+                  files += [p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in {'.cs','.json','.txt','.py'}]
+
+          needles=re.compile(r'(?i)(nameserver|ns\.rec\.net|recnet|rec\.net|serviceurl|apiurl|authurl|account|matchmaking|photon|leaderboard|commerce|economy|notification|discovery)')
+          chunks=[]
+          for path in files:
+              try: lines=path.read_text(errors='replace').splitlines()
+              except Exception: continue
+              for i,line in enumerate(lines):
+                  if not needles.search(line): continue
+                  lo=max(0,i-12); hi=min(len(lines),i+30)
+                  block='\n'.join(f'{j+1}: {lines[j]}' for j in range(lo,hi))
+                  chunks.append(f'\n===== {path} around line {i+1} =====\n{block}')
+          text='\n'.join(chunks)
+          Path('nameserver-contract-findings.txt').write_text(text,encoding='utf-8')
+          print(text[:100000])
+          print('FINDING_BLOCKS=',len(chunks))
+          PY
+
+      - name: Upload contract findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: may2022-nameserver-contract
+          path: |
+            nameserver-contract-findings.txt
+            il2cppdumper.log
+            out/dump.cs
+            out/stringliteral.json
+          if-no-files-found: warn
+          retention-days: 3
