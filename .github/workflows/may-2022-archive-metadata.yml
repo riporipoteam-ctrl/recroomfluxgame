@@ -13,7 +13,7 @@ permissions:
 jobs:
   metadata:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Read May 19 2022 archive page metadata only
         shell: bash
@@ -33,26 +33,25 @@ jobs:
           echo '--- page bytes ---'
           wc -c /tmp/recagain-meta/page.html
 
-      - name: Extract build identity, text links and candidate metadata endpoints
+      - name: Extract build identity and metadata links
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from html.parser import HTMLParser
           from pathlib import Path
-          from urllib.parse import urljoin, urlparse
-          import json, re
+          from urllib.parse import urljoin
+          import re
 
           base = 'https://archive.recagain.site/2022-05-19T06-50-09Z'
           text = Path('/tmp/recagain-meta/page.html').read_text('utf-8', errors='replace')
 
           class P(HTMLParser):
               def __init__(self):
-                  super().__init__(); self.links=[]; self.scripts=[]
+                  super().__init__(); self.links=[]
               def handle_starttag(self, tag, attrs):
                   a=dict(attrs)
-                  if tag=='a' and a.get('href'): self.links.append((a.get('href'), a.get('download')))
-                  if tag=='script' and a.get('src'): self.scripts.append(a.get('src'))
+                  if tag=='a' and a.get('href'): self.links.append(a.get('href'))
           p=P(); p.feed(text)
 
           print('TARGET_BUILD_ID=8751857')
@@ -61,68 +60,120 @@ jobs:
           print('TARGET_BUILD_DATE=2022-05-19T06-50-09Z')
           print('contains_build_id=', '8751857' in text)
           print('contains_manifest_id=', '6337851004861751095' in text)
-
-          urls=[]
-          for href, download in p.links:
+          for href in p.links:
               absolute=urljoin(base, href)
-              urls.append(absolute)
-              lowered=absolute.lower()
-              if any(k in lowered for k in ('api','json','manifest','database','file','download','torrent','metadata')) or download is not None:
-                  print('CANDIDATE_LINK', absolute, 'download=' + str(download))
-          for src in p.scripts:
-              print('SCRIPT', urljoin(base, src))
-
-          # Surface inline framework data and obvious API paths without fetching binaries.
-          patterns = [
-              r'https://[^\"\'<> ]+',
-              r'/api/[^\"\'<> ]+',
-              r'/[^\"\'<> ]*(?:manifest|metadata|files|download|database)[^\"\'<> ]*',
-          ]
-          found=set()
-          for pat in patterns:
-              for value in re.findall(pat, text, flags=re.I):
-                  if len(value) < 500:
-                      found.add(value.replace('&amp;', '&'))
-          for value in sorted(found):
-              print('INLINE_CANDIDATE', value)
-
-          Path('/tmp/recagain-meta/links.json').write_text(json.dumps(sorted(set(urls)), indent=2))
+              if any(k in absolute.lower() for k in ('manifest','database','torrent','download')):
+                  print('ARCHIVE_METADATA_LINK', absolute)
+          for value in sorted(set(re.findall(r'/[^\"\'<> ]*(?:manifest|download|database)[^\"\'<> ]*', text, flags=re.I))):
+              if len(value) < 500:
+                  print('INLINE_METADATA_PATH', value.replace('&amp;', '&'))
           PY
 
-      - name: Inspect same-origin text metadata candidates only
+      - name: Download public SQLite metadata index only
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --max-filesize 220000000 \
+            --connect-timeout 15 --max-time 180 \
+            -A 'RipoTeam-BuildIdentityProbe/1.0' \
+            -o /tmp/recagain-meta/index.db.xz \
+            'https://archive.recagain.site/index.db.xz'
+          echo 'metadata_xz_bytes='$(wc -c </tmp/recagain-meta/index.db.xz)
+          xz -dc /tmp/recagain-meta/index.db.xz > /tmp/recagain-meta/index.db
+          echo 'metadata_db_bytes='$(wc -c </tmp/recagain-meta/index.db)
+
+      - name: Extract exact build 8751857 critical-file fingerprints
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, subprocess
+          import hashlib, json, sqlite3
           from pathlib import Path
-          from urllib.parse import urlparse
 
-          links=json.loads(Path('/tmp/recagain-meta/links.json').read_text())
-          chosen=[]
-          for u in links:
-              p=urlparse(u)
-              if p.hostname != 'archive.recagain.site':
+          db='/tmp/recagain-meta/index.db'
+          con=sqlite3.connect(db)
+          con.row_factory=sqlite3.Row
+          tables=[r[0] for r in con.execute("select name from sqlite_master where type='table' order by name")]
+          print('TABLES', tables)
+          for table in tables:
+              cols=[r[1] for r in con.execute(f'pragma table_info({table})')]
+              print('SCHEMA', table, cols)
+
+          build=con.execute('select * from build_metadata where build_id=?', (8751857,)).fetchone()
+          if not build:
+              raise SystemExit('build 8751857 missing from archive metadata DB')
+          print('BUILD_ROW', dict(build))
+          if str(build['manifest_id']) != '6337851004861751095':
+              raise SystemExit(f"wrong manifest for build 8751857: {build['manifest_id']}")
+
+          root=con.execute('select * from roots where root_dir_name=?', ('2022-05-19T06-50-09Z',)).fetchone()
+          if not root:
+              # Be tolerant of a parent prefix while still requiring the unique build directory name.
+              root=con.execute("select * from roots where root_dir_name like ? order by length(root_dir_name) limit 1", ('%2022-05-19T06-50-09Z%',)).fetchone()
+          if not root:
+              raise SystemExit('May 19 2022 root missing from archive metadata DB')
+          root_id=root['id']
+          print('ROOT_ROW', {k:(v.hex() if isinstance(v,bytes) else v) for k,v in dict(root).items()})
+
+          rows=con.execute('select relative_path, filename, size, file_hash from files where root_id=?', (root_id,)).fetchall()
+          if not rows:
+              raise SystemExit('no files linked to May 19 2022 root')
+          print('FILE_COUNT', len(rows))
+          print('TOTAL_BYTES', sum(int(r['size'] or 0) for r in rows))
+
+          by_path={str(r['relative_path']).replace('\\','/').lstrip('./').lower():r for r in rows}
+          by_name={}
+          for r in rows:
+              by_name.setdefault(str(r['filename']).lower(), []).append(r)
+
+          wanted=[
+              'RecRoom.exe',
+              'Recroom_Release.exe',
+              'GameAssembly.dll',
+              'UnityPlayer.dll',
+              'global-metadata.dat',
+              '471711_6337851004861751095.manifest',
+          ]
+          picked={}
+          for name in wanted:
+              matches=by_name.get(name.lower(), [])
+              if not matches:
                   continue
-              low=p.path.lower()
-              if any(k in low for k in ('api','json','manifest','metadata','database')):
-                  chosen.append(u)
-          for i,u in enumerate(chosen[:12]):
-              out=f'/tmp/recagain-meta/candidate-{i}.txt'
-              cmd=['curl','--fail','--silent','--show-error','--location','--max-filesize','2097152','--connect-timeout','10','--max-time','30','-A','RipoTeam-BuildIdentityProbe/1.0','-o',out,u]
-              print('FETCH_TEXT_CANDIDATE', u)
-              try:
-                  subprocess.run(cmd, check=True)
-              except subprocess.CalledProcessError as e:
-                  print('candidate_fetch_failed=', e.returncode)
-                  continue
-              data=Path(out).read_bytes()
-              if b'\x00' in data[:4096]:
-                  print('candidate_rejected_binary bytes=', len(data))
-                  Path(out).unlink(missing_ok=True)
-                  continue
-              text=data.decode('utf-8','replace')
-              print(text[:12000])
+              # Prefer the shallowest canonical game path if duplicates exist.
+              row=sorted(matches, key=lambda r:(str(r['relative_path']).count('/'), len(str(r['relative_path']))))[0]
+              raw_hash=row['file_hash']
+              sha256=raw_hash.hex() if isinstance(raw_hash,(bytes,bytearray)) else str(raw_hash)
+              picked[name]={
+                  'path':str(row['relative_path']).replace('\\','/').lstrip('./'),
+                  'size':int(row['size']),
+                  'sha256':sha256.lower(),
+              }
+              print('CRITICAL_FILE', name, json.dumps(picked[name], sort_keys=True))
+
+          exe_key='RecRoom.exe' if 'RecRoom.exe' in picked else 'Recroom_Release.exe'
+          required=[exe_key,'GameAssembly.dll','global-metadata.dat']
+          missing=[name for name in required if name not in picked]
+          if missing:
+              raise SystemExit('critical build fingerprint entries missing: '+', '.join(missing))
+
+          fingerprint={
+              'schema':1,
+              'buildId':'8751857',
+              'manifestId':'6337851004861751095',
+              'depotId':'471711',
+              'buildDate':'2022-05-19T06-50-09Z',
+              'updateName':'Under Construction A',
+              'fileCount':len(rows),
+              'totalBytes':sum(int(r['size'] or 0) for r in rows),
+              'criticalFiles':picked,
+          }
+          canonical=json.dumps(fingerprint, sort_keys=True, separators=(',',':')).encode()
+          fingerprint['fingerprintSha256']=hashlib.sha256(canonical).hexdigest()
+          Path('/tmp/recagain-meta/may-2022-fingerprint.json').write_text(json.dumps(fingerprint, indent=2, sort_keys=True))
+          print('FINGERPRINT_JSON_BEGIN')
+          print(json.dumps(fingerprint, indent=2, sort_keys=True))
+          print('FINGERPRINT_JSON_END')
           PY
 
       - name: Summarize known archive identity
@@ -132,4 +183,4 @@ jobs:
           echo 'Build ID: 8751857'
           echo 'Manifest ID: 6337851004861751095'
           echo 'Depot: 471711'
-          echo 'This workflow intentionally does not download or upload the proprietary Rec Room client.'
+          echo 'Only public metadata/index data was downloaded. The proprietary Rec Room client was not downloaded or uploaded.'
