@@ -1,0 +1,31 @@
+name: Verify May 12 RecNet bootstrap literal
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-may12-bootstrap-literal.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Verify exact literal
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --max-time 120 'https://archive.recagain.site/2022-05-12T06-50-19Z/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat' -o global-metadata.dat
+          python3 - <<'PY'
+          from pathlib import Path
+          b=Path('global-metadata.dat').read_bytes()
+          s=b'https://ns.rec.net/?v=2'
+          print('LITERAL_COUNT=',b.count(s))
+          print('SOURCE_LENGTH=',len(s))
+          print('TARGET_LENGTH=',len(b'https://127.0.0.1:81/ns'))
+          assert b.count(s)==1
+          assert len(s)==len(b'https://127.0.0.1:81/ns')
+          PY
