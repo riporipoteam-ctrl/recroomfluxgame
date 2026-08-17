@@ -15,41 +15,51 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Query Cert Spotter and compare SPKI pins
+      - name: Walk Cert Spotter history and compare SPKI pins
         shell: bash
         env:
           PIN1: a7461e4bd2d01f98d5ff780d6eb6b2662384d38cbc4c50835d8977a3e90f13e0
           PIN2: cb80e833e6da1db731cfd19041d739b3a8fbb1da89a96bd46246b80e8ffa0053
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 --max-time 45 'https://api.certspotter.com/v1/issuances?domain=ns.rec.net&include_subdomains=false&expand=dns_names&expand=issuer&expand=cert_der' -o ct.json
           python3 - <<'PY'
-          import json, datetime, base64, subprocess, tempfile, pathlib, os
-          rows=json.load(open('ct.json'))
-          print('CT_ROWS=',len(rows))
+          import json, datetime, base64, subprocess, tempfile, pathlib, os, urllib.request, urllib.parse, hashlib, time
           target=datetime.datetime(2022,5,19,tzinfo=datetime.timezone.utc)
           pins={os.environ['PIN1'].lower(),os.environ['PIN2'].lower()}
-          matches=0; active=0
+          after='0'; matches=0; active=0; total=0
           def dt(s):
               if not s:return None
-              s=s.replace('Z','+00:00')
-              return datetime.datetime.fromisoformat(s)
-          for r in rows:
-              nb,na=dt(r.get('not_before')),dt(r.get('not_after'))
-              if not (nb and na and nb <= target <= na):
-                  continue
-              active+=1
-              der=base64.b64decode(r['cert_der'])
-              with tempfile.TemporaryDirectory() as td:
-                  p=pathlib.Path(td)/'c.der'; p.write_bytes(der)
-                  pem=subprocess.check_output(['openssl','x509','-inform','DER','-in',str(p),'-pubkey','-noout'])
-                  q=subprocess.Popen(['openssl','pkey','-pubin','-outform','DER'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
-                  pub,_=q.communicate(pem)
-                  import hashlib
-                  h=hashlib.sha256(pub).hexdigest()
-              print('CERT',r.get('id'),'not_before',r.get('not_before'),'not_after',r.get('not_after'),'issuer',r.get('issuer',{}).get('name'),'SPKI',h)
-              if h in pins:
-                  matches+=1; print('*** PIN MATCH ***')
-          print('ACTIVE_ON_2022_05_19=',active)
+              return datetime.datetime.fromisoformat(s.replace('Z','+00:00'))
+          for page in range(40):
+              qs=urllib.parse.urlencode({'domain':'rec.net','include_subdomains':'true','expand':['dns_names','issuer','cert_der'],'after':after},doseq=True)
+              req=urllib.request.Request('https://api.certspotter.com/v1/issuances?'+qs,headers={'User-Agent':'RipoTeam-preservation-diagnostic/1.0'})
+              try:
+                  rows=json.load(urllib.request.urlopen(req,timeout=30))
+              except Exception as e:
+                  print('PAGE_ERROR',page,repr(e)); break
+              print('PAGE',page,'ROWS',len(rows),'AFTER',after)
+              if not rows: break
+              total += len(rows)
+              for r in rows:
+                  names=[n.lower() for n in (r.get('dns_names') or [])]
+                  covers=('ns.rec.net' in names or '*.rec.net' in names)
+                  if not covers: continue
+                  nb,na=dt(r.get('not_before')),dt(r.get('not_after'))
+                  if not (nb and na and nb <= target <= na): continue
+                  active+=1
+                  der=base64.b64decode(r['cert_der'])
+                  with tempfile.TemporaryDirectory() as td:
+                      p=pathlib.Path(td)/'c.der'; p.write_bytes(der)
+                      pem=subprocess.check_output(['openssl','x509','-inform','DER','-in',str(p),'-pubkey','-noout'])
+                      q=subprocess.Popen(['openssl','pkey','-pubin','-outform','DER'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+                      pub,_=q.communicate(pem)
+                      h=hashlib.sha256(pub).hexdigest()
+                  print('CANDIDATE',r.get('id'),'DNS',names,'NB',r.get('not_before'),'NA',r.get('not_after'),'ISSUER',r.get('issuer',{}).get('name'),'SPKI',h)
+                  if h in pins:
+                      matches+=1; print('*** PIN MATCH ***')
+              after=str(rows[-1]['id'])
+              time.sleep(.15)
+          print('TOTAL_CT_ROWS=',total)
+          print('ACTIVE_NS_CERTS_ON_2022_05_19=',active)
           print('PIN_MATCHES=',matches)
           PY
