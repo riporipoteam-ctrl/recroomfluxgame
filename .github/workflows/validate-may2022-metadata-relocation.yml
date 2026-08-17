@@ -1,0 +1,73 @@
+name: Validate May 2022 Metadata URL Relocation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/validate-may2022-metadata-relocation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Download exact May 2022 metadata and validate relocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://archive.recagain.site/2022-05-19T06-50-09Z/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat'
+          curl -fsSL --connect-timeout 15 --max-time 120 --max-filesize 134217728 "$url" -o /tmp/global-metadata.dat
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+
+          p=Path('/tmp/global-metadata.dat')
+          data=bytearray(p.read_bytes())
+          source=b'https://ns.rec.net/?v=2'
+          target=b'https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-bootstrap/ns?ip=127.0.0.2'
+          print('metadata_bytes', len(data))
+          sanity, version = struct.unpack_from('<II', data, 0)
+          print('sanity', hex(sanity), 'version', version)
+          if sanity != 0xFAB11BAF:
+              raise SystemExit('unexpected IL2CPP metadata magic')
+          string_literal_offset, string_literal_count, string_literal_data_offset, string_literal_data_count = struct.unpack_from('<IIII', data, 8)
+          print('stringLiteralOffset', string_literal_offset)
+          print('stringLiteralCountBytes', string_literal_count)
+          print('stringLiteralDataOffset', string_literal_data_offset)
+          print('stringLiteralDataCountBytes', string_literal_data_count)
+          positions=[]
+          pos=0
+          while True:
+              pos=data.find(source,pos)
+              if pos < 0: break
+              positions.append(pos); pos += 1
+          print('source_positions', [hex(x) for x in positions])
+          if not positions:
+              raise SystemExit('legacy nameserver URL missing')
+          matched=[]
+          for source_pos in positions:
+              source_index=source_pos-string_literal_data_offset
+              for entry in range(string_literal_offset, string_literal_offset+string_literal_count, 8):
+                  length, data_index = struct.unpack_from('<II', data, entry)
+                  if length == len(source) and data_index == source_index:
+                      matched.append((entry, source_pos, source_index))
+          print('matched_entries', [(hex(a),hex(b),c) for a,b,c in matched])
+          if len(matched) != 1:
+              raise SystemExit(f'expected one literal-table entry, got {len(matched)}')
+          entry, source_pos, source_index = matched[0]
+          new_file_offset=len(data)
+          new_data_index=new_file_offset-string_literal_data_offset
+          data.extend(target)
+          struct.pack_into('<II', data, entry, len(target), new_data_index)
+          length2, data_index2=struct.unpack_from('<II',data,entry)
+          resolved=bytes(data[string_literal_data_offset+data_index2:string_literal_data_offset+data_index2+length2])
+          print('patched_entry', hex(entry), 'length', length2, 'dataIndex', data_index2)
+          print('resolved_target', resolved.decode('ascii'))
+          if resolved != target:
+              raise SystemExit('relocated string does not resolve')
+          print('METADATA_RELOCATION_VALID=true')
+          PY
