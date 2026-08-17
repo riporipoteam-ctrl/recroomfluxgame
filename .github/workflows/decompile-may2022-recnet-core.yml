@@ -42,7 +42,7 @@ jobs:
           set -e
           test -s out/dump.cs
 
-      - name: Extract FGCLJJMGLAI core, service enum, and bootstrap disassembly
+      - name: Extract exact RecNet core and PIPCAIJJNLK disassembly
         shell: bash
         run: |
           set -euo pipefail
@@ -52,52 +52,74 @@ jobs:
           lines=Path('out/dump.cs').read_text(errors='replace').splitlines()
           chunks=[]
 
-          def capture(anchor, before=20, after=500, label=None):
-              for i,line in enumerate(lines):
-                  if anchor in line:
-                      lo=max(0,i-before); hi=min(len(lines),i+after)
-                      chunks.append(f'===== {label or anchor} dump.cs lines {lo+1}-{hi} =====')
-                      chunks.extend(f'{j+1}: {lines[j]}' for j in range(lo,hi))
-                      return i
-              chunks.append(f'===== MISSING {anchor} =====')
-              return -1
+          def capture_index(i, before, after, label):
+              lo=max(0,i-before); hi=min(len(lines),i+after)
+              chunks.append(f'===== {label} dump.cs lines {lo+1}-{hi} =====')
+              chunks.extend(f'{j+1}: {lines[j]}' for j in range(lo,hi))
 
-          fg=capture('internal class FGCLJJMGLAI //', 20, 760, 'FGCLJJMGLAI CORE')
-          capture('enum KHJPLDAEBPP', 20, 180, 'SERVICE ENUM KHJPLDAEBPP')
-          capture('class JMAANPPEBJE', 20, 260, 'BESTHTTP REQUEST JMAANPPEBJE')
-          capture('class DCHGFBHPDAP', 20, 220, 'RESPONSE DCHGFBHPDAP')
+          def find_contains(text):
+              return next((i for i,line in enumerate(lines) if text in line), -1)
 
-          # Find exact method declaration and its RVA.
-          rva=None
-          method_line=None
+          # Grab the method directly first; this cannot depend on the class visibility keyword.
+          method_line=find_contains('PIPCAIJJNLK')
+          if method_line >= 0:
+              capture_index(method_line, 140, 260, 'PIPCAIJJNLK METHOD CONTEXT')
+          else:
+              chunks.append('===== PIPCAIJJNLK NOT FOUND =====')
+
+          # Locate the top-level class with a visibility-agnostic pattern.
+          fg=-1
+          class_re=re.compile(r'\bclass\s+FGCLJJMGLAI\b')
+          for i,line in enumerate(lines):
+              if class_re.search(line) and '.' not in line.split('class',1)[1].split('//',1)[0]:
+                  fg=i; break
           if fg >= 0:
-              for j in range(fg, min(len(lines), fg+900)):
-                  if 'PIPCAIJJNLK' in lines[j]:
-                      method_line=j
-                      for k in range(max(fg,j-4), j+1):
-                          m=re.search(r'RVA:\s*0x([0-9A-Fa-f]+)', lines[k])
-                          if m:
-                              rva=int(m.group(1),16)
-                      break
-          chunks.append(f'PIPCAIJJNLK_LINE={method_line+1 if method_line is not None else None}')
-          chunks.append(f'PIPCAIJJNLK_RVA={hex(rva) if rva is not None else None}')
+              capture_index(fg, 20, 1050, 'FGCLJJMGLAI CORE')
+          else:
+              chunks.append('===== TOP-LEVEL FGCLJJMGLAI CLASS NOT FOUND =====')
 
-          Path('recnet-core.txt').write_text('\n'.join(chunks), encoding='utf-8')
+          for text,label,before,after in [
+              ('enum KHJPLDAEBPP','SERVICE ENUM KHJPLDAEBPP',20,180),
+              ('class JMAANPPEBJE','BESTHTTP REQUEST JMAANPPEBJE',20,260),
+              ('class DCHGFBHPDAP','RESPONSE DCHGFBHPDAP',20,240),
+          ]:
+              i=find_contains(text)
+              if i >= 0: capture_index(i,before,after,label)
+              else: chunks.append(f'===== {label} NOT FOUND =====')
+
+          rva=None
+          if method_line >= 0:
+              for k in range(max(0,method_line-8), method_line+1):
+                  m=re.search(r'RVA:\s*0x([0-9A-Fa-f]+)', lines[k])
+                  if m:
+                      rva=int(m.group(1),16)
+          chunks.append(f'PIPCAIJJNLK_LINE={method_line+1 if method_line >= 0 else None}')
+          chunks.append(f'PIPCAIJJNLK_RVA={hex(rva) if rva is not None else None}')
+          Path('recnet-core.txt').write_text('\n'.join(chunks),encoding='utf-8')
 
           if rva is not None:
-              # GNU objdump on PE accepts RVAs as section VMAs for this image layout.
-              start=max(0,rva-0x80); stop=rva+0x900
+              start=max(0,rva-0x100); stop=rva+0x1200
               p=subprocess.run(['objdump','-d','-Mintel',f'--start-address=0x{start:x}',f'--stop-address=0x{stop:x}','GameAssembly.dll'],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
               Path('pipcaijjnlk-disasm.txt').write_text(p.stdout,encoding='utf-8')
           else:
               Path('pipcaijjnlk-disasm.txt').write_text('RVA not found\n')
 
-          # Strings that can reveal config keys, cached nameserver behavior, and exact URL casing.
-          s=subprocess.run(['strings','-a','-n','4','GameAssembly.dll'],text=True,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
-          terms=('ns.rec.net','NameServer','nameserver','RecNetStatus','cachedNameServer','ConnectToRecNet','ConnectionRequest')
-          found=[x for x in s.stdout.splitlines() if any(t.lower() in x.lower() for t in terms)]
-          Path('recnet-native-strings.txt').write_text('\n'.join(found[:4000]),encoding='utf-8')
-          print('\n'.join(chunks[:1200]))
+          # Metadata contains managed string literals; dump contexts around all relevant names.
+          metadata=Path('global-metadata.dat').read_bytes()
+          needles=[b'https://ns.rec.net/?v=2', b'NameServerResponse', b'ConnectToRecNet', b'RecNetStatus']
+          rows=[]
+          for needle in needles:
+              start=0
+              while True:
+                  pos=metadata.find(needle,start)
+                  if pos < 0: break
+                  lo=max(0,pos-160); hi=min(len(metadata),pos+len(needle)+320)
+                  chunk=metadata[lo:hi]
+                  printable=''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
+                  rows.append(f'{needle!r} at 0x{pos:x}: {printable}')
+                  start=pos+1
+          Path('recnet-metadata-context.txt').write_text('\n'.join(rows),encoding='utf-8')
+          print('\n'.join(chunks[:1600]))
           PY
 
       - name: Upload RecNet bootstrap core
@@ -107,6 +129,6 @@ jobs:
           path: |
             recnet-core.txt
             pipcaijjnlk-disasm.txt
-            recnet-native-strings.txt
+            recnet-metadata-context.txt
             il2cppdumper.log
           retention-days: 3
