@@ -1,0 +1,80 @@
+name: Inspect Dec 19 2019 Rec Room client
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/inspect-dec19-2019-client.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Download Dec 19 2019 archive and inventory scripting payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://archive.recagain.site/download/2019-12-19T21-30-25Z'
+          curl -fL --retry 2 --max-time 420 --progress-bar "$url" -o build.zip
+          echo "ZIP_BYTES=$(stat -c%s build.zip)"
+          python3 - <<'PY'
+          import zipfile, pathlib, collections, hashlib
+          z=zipfile.ZipFile('build.zip'); infos=z.infolist()
+          print('BUILD_ID=4504243')
+          print('MANIFEST=5948698735243937255')
+          print('ZIP_ENTRIES=',len(infos))
+          roots=collections.Counter(i.filename.split('/')[0] for i in infos if i.filename)
+          for name,count in roots.most_common(): print(f'TOP={name} COUNT={count}')
+          selected=[]
+          print('===== SCRIPTING / BINARY CANDIDATES =====')
+          for i in infos:
+              n=i.filename; low=n.lower()
+              if low.endswith(('.exe','.dll')) or any(k in low for k in ('managed','assembly-csharp','gameassembly','il2cpp','metadata','mono','besthttp','recnet')):
+                  print(f'PATH={n} SIZE={i.file_size} COMPRESSED={i.compress_size}')
+              if (low.endswith('gameassembly.dll') or low.endswith('global-metadata.dat') or
+                  low.endswith('assembly-csharp.dll') or ('besthttp' in low and low.endswith('.dll')) or
+                  low.endswith('recroom_release.exe')):
+                  selected.append(i)
+          pathlib.Path('selected').mkdir(exist_ok=True)
+          for i in selected:
+              out=pathlib.Path('selected')/i.filename.replace('/','__').replace('\\','__')
+              out.write_bytes(z.read(i)); b=out.read_bytes()
+              print(f'EXTRACTED={i.filename} OUT={out} SIZE={len(b)} SHA256={hashlib.sha256(b).hexdigest()}')
+          print('SELECTED_COUNT=',len(selected))
+          PY
+
+      - name: Inspect RecNet/security material
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p1=bytes.fromhex('a7461e4bd2d01f98d5ff780d6eb6b2662384d38cbc4c50835d8977a3e90f13e0')
+          p2=bytes.fromhex('cb80e833e6da1db731cfd19041d739b3a8fbb1da89a96bd46246b80e8ffa0053')
+          for p in Path('selected').glob('*'):
+              b=p.read_bytes(); print(f'FILE={p.name} PIN1={b.count(p1)} PIN2={b.count(p2)} NS_V2={b.count(b"https://ns.rec.net/?v=2")}')
+          PY
+          for f in selected/*; do
+            [ -f "$f" ] || continue
+            echo "===== STRINGS $f ====="
+            strings -a "$f" | grep -E -i 'ns\.rec\.net|CertificateVerify|ICertificateVerify|AlwaysValid|BestHTTP|RecNet|public.?key|sha.?256|certificate' | head -180 || true
+            strings -el "$f" | grep -E -i 'ns\.rec\.net|CertificateVerify|ICertificateVerify|AlwaysValid|BestHTTP|RecNet|public.?key|sha.?256|certificate' | head -180 || true
+          done
+
+      - name: Decompile managed candidate if present
+        shell: bash
+        run: |
+          set -euo pipefail
+          dll=$(find selected -type f \( -iname '*Assembly-CSharp.dll' -o -iname '*Assembly-CSharp.dll*' \) | head -1 || true)
+          if [ -z "$dll" ]; then echo 'MANAGED_CSHARP_PRESENT=false'; exit 0; fi
+          echo "MANAGED_CSHARP_PRESENT=true FILE=$dll"
+          dotnet tool install --global ilspycmd >/dev/null 2>&1 || dotnet tool update --global ilspycmd >/dev/null 2>&1 || true
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          mkdir -p decompiled
+          ilspycmd -p -o decompiled "$dll" >/tmp/ilspy.out 2>/tmp/ilspy.err || true
+          tail -60 /tmp/ilspy.err || true
+          grep -RniE 'ICertificateVerifyer|CustomCertificateVerifyer|CertificateVerify|AlwaysValidVerifyer|ns\.rec\.net|RecNet|SHA256|GetPublicKey' decompiled --include='*.cs' | head -400 || true
