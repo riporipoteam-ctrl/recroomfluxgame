@@ -31,12 +31,13 @@ jobs:
           git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git dumper
           dotnet build dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
           exe=$(find dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1)
-          mkdir out
+          mkdir -p out
           cp GameAssembly.dll global-metadata.dat out/
-          set +e
-          (cd out && DOTNET_ROLL_FORWARD=Major dotnet "$GITHUB_WORKSPACE/$exe" GameAssembly.dll global-metadata.dat)
-          set -e
+          (cd out && DOTNET_ROLL_FORWARD=Major dotnet "$GITHUB_WORKSPACE/$exe" GameAssembly.dll global-metadata.dat) || true
+          echo 'Generated outputs:'
+          find out -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
           test -s out/script.json
+          test -s out/dump.cs
 
       - name: Disassemble verifier-related methods and caller xrefs
         shell: bash
@@ -44,19 +45,15 @@ jobs:
           set -euo pipefail
           python3 -m pip install -q pefile capstone
           python3 - <<'PY'
-          import json, pefile, struct
+          import json, pefile, struct, re
           from capstone import Cs, CS_ARCH_X86, CS_MODE_64
           s=json.load(open('out/script.json'))
           methods=s.get('ScriptMethod',[])
           wanted=[
-            'BestHTTP.HTTPConnection$$Connect',
-            'BestHTTP.HTTPManager$$.cctor',
-            'BestHTTP.HTTPRequest$$get_CustomCertificateVerifyer',
-            'BestHTTP.HTTPRequest$$set_CustomCertificateVerifyer',
-            'BestHTTP.SecureProtocol.AlwaysValidVerifyer$$IsValid',
-            'AlwaysValidVerifyer$$IsValid',
-            'LegacyTlsAuthentication$$NotifyServerCertificate',
-            'LegacyTlsClient$$.ctor',
+            'HTTPConnection$$Connect','HTTPManager$$.cctor',
+            'HTTPRequest$$get_CustomCertificateVerifyer','HTTPRequest$$set_CustomCertificateVerifyer',
+            'AlwaysValidVerifyer$$IsValid','LegacyTlsAuthentication$$NotifyServerCertificate',
+            'LegacyTlsClient$$.ctor'
           ]
           found=[]
           for m in methods:
@@ -65,16 +62,14 @@ jobs:
               found.append((n,int(m.get('Address',0))))
           for n,a in found: print(f'METHOD {n} VA=0x{a:x}')
           pe=pefile.PE('GameAssembly.dll'); base=pe.OPTIONAL_HEADER.ImageBase
-          md=Cs(CS_ARCH_X86,CS_MODE_64); md.detail=True
-          def bytes_at(va,n=1400):
-            rva=va-base; off=pe.get_offset_from_rva(rva); return pe.__data__[off:off+n]
+          md=Cs(CS_ARCH_X86,CS_MODE_64)
+          def bytes_at(va,n=0x520):
+            off=pe.get_offset_from_rva(va-base); return pe.__data__[off:off+n]
           for name,va in found:
             if not va: continue
             print('\n===== DISASM',name,'0x%x'%va,'=====')
             for ins in md.disasm(bytes_at(va),va):
               print(f'{ins.address:016x}: {ins.mnemonic:8} {ins.op_str}')
-              if ins.address >= va+0x500: break
-          # direct call xrefs to custom verifier setter
           setter=next((a for n,a in found if 'set_CustomCertificateVerifyer' in n),0)
           if setter:
             xs=[]
@@ -88,4 +83,12 @@ jobs:
                 if sva+i+5+rel==setter: xs.append(sva+i)
                 pos=i+1
             print('SETTER_DIRECT_XREFS=',','.join(hex(x) for x in xs) if xs else 'NONE')
+          dump=open('out/dump.cs',encoding='utf-8',errors='ignore').read()
+          print('\n===== VERIFIER TYPES / MEMBERS =====')
+          lines=dump.splitlines()
+          for i,line in enumerate(lines):
+            if ('ICertificateVerifyer' in line or 'CustomCertificateVerifyer' in line or
+                'AlwaysValidVerifyer' in line or re.search(r'\bIsValid\s*\(',line)):
+              lo=max(0,i-3); hi=min(len(lines),i+5)
+              print('\n'.join(lines[lo:hi])); print('---')
           PY
