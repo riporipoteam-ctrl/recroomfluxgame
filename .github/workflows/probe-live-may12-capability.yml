@@ -1,0 +1,43 @@
+name: Probe live May 12 Rec Room capability
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/probe-live-may12-capability.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Poll live Rec Room capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/capabilities'
+          for i in $(seq 1 90); do
+            code=$(curl -sS --max-time 15 -o /tmp/cap.json -w '%{http_code}' "$URL" || true)
+            echo "probe[$i] http=$code"
+            if [ "$code" = 200 ] && jq -e . /tmp/cap.json >/dev/null 2>&1; then
+              jq . /tmp/cap.json
+              build=$(jq -r '.targetBuild // empty' /tmp/cap.json)
+              manifest=$(jq -r '.targetManifest // empty' /tmp/cap.json)
+              transport=$(jq -r '.recNetTransport // empty' /tmp/cap.json)
+              patch=$(jq -r '.recNetRedirectPatch // empty' /tmp/cap.json)
+              echo "TARGET_BUILD=$build"
+              echo "TARGET_MANIFEST=$manifest"
+              echo "RECNET_TRANSPORT=$transport"
+              echo "RECNET_PATCH=$patch"
+              if [ "$build" = '8715820' ] && [ "$manifest" = '2586133705164702202' ] && [ "$transport" = 'https-local-tls12-prepin-v1' ]; then
+                echo 'MAY12_CAPABILITY_LIVE=true'
+                exit 0
+              fi
+            fi
+            sleep 4
+          done
+          echo '::error::May 12 capability did not become live.'
+          exit 1
