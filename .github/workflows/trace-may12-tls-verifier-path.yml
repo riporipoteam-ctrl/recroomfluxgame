@@ -34,10 +34,14 @@ jobs:
           mkdir -p out
           cp GameAssembly.dll global-metadata.dat out/
           (cd out && DOTNET_ROLL_FORWARD=Major dotnet "$GITHUB_WORKSPACE/$exe" GameAssembly.dll global-metadata.dat) || true
-          echo 'Generated outputs:'
-          find out -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
-          test -s out/script.json
-          test -s out/dump.cs
+          echo 'Generated outputs anywhere in workspace:'
+          find "$GITHUB_WORKSPACE" \( -name script.json -o -name dump.cs \) -type f -printf '%p %s bytes\n' | sort
+          script=$(find "$GITHUB_WORKSPACE" -name script.json -type f | head -1)
+          dump=$(find "$GITHUB_WORKSPACE" -name dump.cs -type f | head -1)
+          test -n "$script"; test -n "$dump"
+          cp "$script" "$GITHUB_WORKSPACE/out/script.json"
+          cp "$dump" "$GITHUB_WORKSPACE/out/dump.cs"
+          test -s out/script.json; test -s out/dump.cs
 
       - name: Disassemble verifier-related methods and caller xrefs
         shell: bash
@@ -49,27 +53,18 @@ jobs:
           from capstone import Cs, CS_ARCH_X86, CS_MODE_64
           s=json.load(open('out/script.json'))
           methods=s.get('ScriptMethod',[])
-          wanted=[
-            'HTTPConnection$$Connect','HTTPManager$$.cctor',
-            'HTTPRequest$$get_CustomCertificateVerifyer','HTTPRequest$$set_CustomCertificateVerifyer',
-            'AlwaysValidVerifyer$$IsValid','LegacyTlsAuthentication$$NotifyServerCertificate',
-            'LegacyTlsClient$$.ctor'
-          ]
+          wanted=['HTTPConnection$$Connect','HTTPManager$$.cctor','HTTPRequest$$get_CustomCertificateVerifyer','HTTPRequest$$set_CustomCertificateVerifyer','AlwaysValidVerifyer$$IsValid','LegacyTlsAuthentication$$NotifyServerCertificate','LegacyTlsClient$$.ctor']
           found=[]
           for m in methods:
             n=str(m.get('Name',''))
-            if any(w in n for w in wanted):
-              found.append((n,int(m.get('Address',0))))
+            if any(w in n for w in wanted): found.append((n,int(m.get('Address',0))))
           for n,a in found: print(f'METHOD {n} VA=0x{a:x}')
-          pe=pefile.PE('GameAssembly.dll'); base=pe.OPTIONAL_HEADER.ImageBase
-          md=Cs(CS_ARCH_X86,CS_MODE_64)
-          def bytes_at(va,n=0x520):
-            off=pe.get_offset_from_rva(va-base); return pe.__data__[off:off+n]
+          pe=pefile.PE('GameAssembly.dll'); base=pe.OPTIONAL_HEADER.ImageBase; md=Cs(CS_ARCH_X86,CS_MODE_64)
+          def bytes_at(va,n=0x520): return pe.__data__[pe.get_offset_from_rva(va-base):pe.get_offset_from_rva(va-base)+n]
           for name,va in found:
             if not va: continue
             print('\n===== DISASM',name,'0x%x'%va,'=====')
-            for ins in md.disasm(bytes_at(va),va):
-              print(f'{ins.address:016x}: {ins.mnemonic:8} {ins.op_str}')
+            for ins in md.disasm(bytes_at(va),va): print(f'{ins.address:016x}: {ins.mnemonic:8} {ins.op_str}')
           setter=next((a for n,a in found if 'set_CustomCertificateVerifyer' in n),0)
           if setter:
             xs=[]
@@ -83,12 +78,9 @@ jobs:
                 if sva+i+5+rel==setter: xs.append(sva+i)
                 pos=i+1
             print('SETTER_DIRECT_XREFS=',','.join(hex(x) for x in xs) if xs else 'NONE')
-          dump=open('out/dump.cs',encoding='utf-8',errors='ignore').read()
+          dump=open('out/dump.cs',encoding='utf-8',errors='ignore').read(); lines=dump.splitlines()
           print('\n===== VERIFIER TYPES / MEMBERS =====')
-          lines=dump.splitlines()
           for i,line in enumerate(lines):
-            if ('ICertificateVerifyer' in line or 'CustomCertificateVerifyer' in line or
-                'AlwaysValidVerifyer' in line or re.search(r'\bIsValid\s*\(',line)):
-              lo=max(0,i-3); hi=min(len(lines),i+5)
-              print('\n'.join(lines[lo:hi])); print('---')
+            if ('ICertificateVerifyer' in line or 'CustomCertificateVerifyer' in line or 'AlwaysValidVerifyer' in line or re.search(r'\bIsValid\s*\(',line)):
+              print('\n'.join(lines[max(0,i-4):min(len(lines),i+7)])); print('---')
           PY
