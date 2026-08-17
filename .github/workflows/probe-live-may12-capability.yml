@@ -12,32 +12,30 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
-      - name: Poll live Rec Room capability
+      - name: Poll exact May 12 client and transport
         shell: bash
         run: |
           set -euo pipefail
           URL='https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/capabilities'
-          for i in $(seq 1 90); do
+          for i in $(seq 1 130); do
             code=$(curl -sS --max-time 15 -o /tmp/cap.json -w '%{http_code}' "$URL" || true)
-            echo "probe[$i] http=$code"
-            if [ "$code" = 200 ] && jq -e . /tmp/cap.json >/dev/null 2>&1; then
+            build=$(jq -r '.targetBuild // empty' /tmp/cap.json 2>/dev/null || true)
+            manifest=$(jq -r '.targetManifest // empty' /tmp/cap.json 2>/dev/null || true)
+            transport=$(jq -r '.recNetTransport // empty' /tmp/cap.json 2>/dev/null || true)
+            exact=$(jq -r '.exactBuild // false' /tmp/cap.json 2>/dev/null || true)
+            fp=$(jq -r '.checks.fingerprint // false' /tmp/cap.json 2>/dev/null || true)
+            reason=$(jq -r '.reason // empty' /tmp/cap.json 2>/dev/null || true)
+            echo "probe[$i] http=$code build=$build manifest=$manifest transport=$transport exact=$exact fingerprint=$fp reason=$reason"
+            if [ "$code" = 200 ] && [ "$build" = '8715820' ] && [ "$manifest" = '2586133705164702202' ] && [ "$transport" = 'https-local-tls12-prepin-v1' ] && [ "$exact" = true ] && [ "$fp" = true ]; then
               jq . /tmp/cap.json
-              build=$(jq -r '.targetBuild // empty' /tmp/cap.json)
-              manifest=$(jq -r '.targetManifest // empty' /tmp/cap.json)
-              transport=$(jq -r '.recNetTransport // empty' /tmp/cap.json)
-              patch=$(jq -r '.recNetRedirectPatch // empty' /tmp/cap.json)
-              echo "TARGET_BUILD=$build"
-              echo "TARGET_MANIFEST=$manifest"
-              echo "RECNET_TRANSPORT=$transport"
-              echo "RECNET_PATCH=$patch"
-              if [ "$build" = '8715820' ] && [ "$manifest" = '2586133705164702202' ] && [ "$transport" = 'https-local-tls12-prepin-v1' ]; then
-                echo 'MAY12_CAPABILITY_LIVE=true'
-                exit 0
-              fi
+              echo 'MAY12_EXACT_BUILD_LIVE=true'
+              exit 0
             fi
             sleep 4
           done
-          echo '::error::May 12 capability did not become live.'
+          echo '===== LAST CAPABILITY ====='
+          cat /tmp/cap.json || true
+          echo '::error::Exact May 12 client did not become ready.'
           exit 1
