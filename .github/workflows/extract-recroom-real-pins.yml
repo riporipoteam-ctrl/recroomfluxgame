@@ -1,0 +1,34 @@
+name: Extract Rec Room real SPKI pins
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/extract-recroom-real-pins.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Download exact May 19 2022 metadata and extract pin blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --max-time 120 'https://archive.recagain.site/2022-05-19T06-50-09Z/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat' -o global-metadata.dat
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib
+          b=Path('global-metadata.dat').read_bytes()
+          for i,off in enumerate((0xD8F746,0xD8F766),1):
+              x=b[off:off+32]
+              assert len(x)==32
+              print(f'PIN{i}_HEX={x.hex()}')
+              print(f'PIN{i}_B64={base64.b64encode(x).decode()}')
+          print('metadata_sha256='+hashlib.sha256(b).hexdigest())
+          print('metadata_size='+str(len(b)))
+          PY
