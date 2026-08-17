@@ -1,0 +1,37 @@
+name: Trace May 2022 TLS Certificate Verifier
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/trace-may2022-tls-verifier.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Fetch exact GameAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+      - name: Trace verifier setup and certificate callback
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '===== HTTPManager cctor 0x182E1B0D0 ====='
+          objdump -d -Mintel --start-address=0x182e1b080 --stop-address=0x182e1b780 GameAssembly.dll
+          echo '===== DefaultCertificateVerifyer getter 0x182E1B7A0 ====='
+          objdump -d -Mintel --start-address=0x182e1b780 --stop-address=0x182e1b8a0 GameAssembly.dll
+          echo '===== CallCustomCertificationValidator 0x182E1E920 ====='
+          objdump -d -Mintel --start-address=0x182e1e880 --stop-address=0x182e1eb20 GameAssembly.dll
+          echo '===== LegacyTlsAuthentication NotifyServerCertificate 0x180909? ====='
+          objdump -d -Mintel --start-address=0x180908f00 --stop-address=0x180909700 GameAssembly.dll
+          echo '===== AlwaysValidVerifyer IsValid 0x? ====='
+          objdump -d -Mintel --start-address=0x18223f000 --stop-address=0x182241000 GameAssembly.dll | grep -B20 -A60 -Ei 'ret|test|call' | head -600 || true
