@@ -1,0 +1,34 @@
+name: Diagnose Rec Room verifier implementation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-recroom-verifier-impl.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  disassemble:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Download exact May 19 2022 GameAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
+          echo '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27  GameAssembly.dll' | sha256sum -c -
+
+      - name: Disassemble certificate verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '===== custom verifier IsValid 0x182DAB2B0 ====='
+          objdump -d -Mintel --start-address=0x182DAB280 --stop-address=0x182DAB580 GameAssembly.dll
+          echo '===== verifier singleton cctor 0x182DAB560 ====='
+          objdump -d -Mintel --start-address=0x182DAB540 --stop-address=0x182DAB640 GameAssembly.dll
+          echo '===== verifier helper methods 0x182D9DBD0..0x182D9E900 ====='
+          objdump -d -Mintel --start-address=0x182D9DBA0 --stop-address=0x182D9E900 GameAssembly.dll
