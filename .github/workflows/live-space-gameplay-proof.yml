@@ -1,0 +1,177 @@
+name: Live Rec Room Gameplay Proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/live-space-gameplay-proof.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  gameplay-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SPACE_URL: https://echoxr-ripoteam-cloud-pc.hf.space
+      FIREBASE_API_KEY: AIzaSyBV_ev8AVpKwgioPSSWiBYf8UU09bLbWOU
+    steps:
+      - name: Install image checker
+        run: python -m pip install --quiet pillow
+
+      - name: Launch game and verify playable stream
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/recroom-proof
+          SESSION_ID=''
+          ACCESS_TOKEN=''
+          FIREBASE_TOKEN=''
+
+          cleanup() {
+            set +e
+            if [ -n "$SESSION_ID" ] && [ -n "$ACCESS_TOKEN" ]; then
+              curl -fsS --max-time 20 -X POST \
+                "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/release?accessToken=$ACCESS_TOKEN" \
+                -o /tmp/recroom-proof/release.json || true
+            fi
+            if [ -n "$FIREBASE_TOKEN" ]; then
+              curl -fsS --max-time 20 -X POST \
+                "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$FIREBASE_API_KEY" \
+                -H 'content-type: application/json' \
+                --data "$(jq -cn --arg t "$FIREBASE_TOKEN" '{idToken:$t}')" \
+                -o /tmp/recroom-proof/firebase-delete.json || true
+            fi
+          }
+          trap cleanup EXIT
+
+          TEST_EMAIL="recroom-gameplay-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}@example.com"
+          TEST_PASSWORD="Rr!$(openssl rand -hex 18)"
+          AUTH_BODY="$(jq -cn --arg email "$TEST_EMAIL" --arg password "$TEST_PASSWORD" \
+            '{email:$email,password:$password,returnSecureToken:true}')"
+          AUTH_CODE="$(curl -sS --max-time 30 -o /tmp/recroom-proof/auth.json -w '%{http_code}' \
+            -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" \
+            -H 'content-type: application/json' --data "$AUTH_BODY")"
+          test "$AUTH_CODE" = '200'
+          FIREBASE_TOKEN="$(jq -r '.idToken // empty' /tmp/recroom-proof/auth.json)"
+          test -n "$FIREBASE_TOKEN"
+
+          CREATE_CODE="$(curl -sS --max-time 45 -o /tmp/recroom-proof/create.json -w '%{http_code}' \
+            -X POST "$SPACE_URL/api/recroom-public/sessions" \
+            -H "authorization: Bearer $FIREBASE_TOKEN" \
+            -H 'content-type: application/json' \
+            --data '{"buildId":"recroom-2022-05-19"}')"
+          test "$CREATE_CODE" = '202'
+          SESSION_ID="$(jq -r '.sessionId // empty' /tmp/recroom-proof/create.json)"
+          ACCESS_TOKEN="$(jq -r '.sessionAccessToken // empty' /tmp/recroom-proof/create.json)"
+          test -n "$SESSION_ID"
+          test -n "$ACCESS_TOKEN"
+
+          READY=0
+          for i in $(seq 1 75); do
+            curl -fsS --max-time 20 \
+              "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID?accessToken=$ACCESS_TOKEN" \
+              -o /tmp/recroom-proof/status.json
+            STATE="$(jq -r '.state // empty' /tmp/recroom-proof/status.json)"
+            PHASE="$(jq -r '.phase // empty' /tmp/recroom-proof/status.json)"
+            PROGRESS="$(jq -r '.progress // 0' /tmp/recroom-proof/status.json)"
+            echo "launch[$i] state=$STATE phase=$PHASE progress=$PROGRESS"
+            if [ "$STATE" = ready ]; then READY=1; break; fi
+            if [ "$STATE" = failed ]; then
+              jq '{state,phase,progress,error}' /tmp/recroom-proof/status.json
+              exit 1
+            fi
+            sleep 4
+          done
+          test "$READY" = '1'
+
+          STREAM_URL="$(jq -r '.streamUrl // empty' /tmp/recroom-proof/status.json)"
+          test -n "$STREAM_URL"
+          echo 'RECROOM_GAME_WINDOW_READY=true'
+
+          python - "$STREAM_URL" <<'PY'
+          import sys, urllib.parse
+          url=sys.argv[1]
+          p=urllib.parse.urlsplit(url)
+          q=urllib.parse.parse_qs(p.query)
+          token=q.get('token',[''])[0]
+          base=urllib.parse.urlunsplit((p.scheme,p.netloc,p.path,'',''))
+          if not base.endswith('/'):
+              base += '/'
+          open('/tmp/recroom-proof/stream-base.txt','w').write(base)
+          open('/tmp/recroom-proof/stream-token.txt','w').write(token)
+          PY
+          STREAM_BASE="$(cat /tmp/recroom-proof/stream-base.txt)"
+          STREAM_TOKEN="$(cat /tmp/recroom-proof/stream-token.txt)"
+          test -n "$STREAM_TOKEN"
+
+          # Prove the interactive stream document is reachable.
+          curl -fsS --max-time 20 "${STREAM_BASE}?token=$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$STREAM_TOKEN")" \
+            -o /tmp/recroom-proof/player.html
+          grep -q 'Rec Room' /tmp/recroom-proof/player.html
+
+          # Verify the input/control endpoint on the live sandbox with the safe
+          # release-all command (no gameplay state is changed).
+          INPUT_CODE="$(curl -sS --max-time 10 -o /tmp/recroom-proof/input.json -w '%{http_code}' \
+            -X POST "${STREAM_BASE}input?token=$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$STREAM_TOKEN")" \
+            -H 'content-type: application/json' --data '{"type":"release"}')"
+          test "$INPUT_CODE" = '200'
+          echo 'RECROOM_CONTROLS_ENDPOINT_READY=true'
+
+          # Poll actual game frames until Rec Room renders something other than
+          # the initial all-black startup surface. Keep the last frame as proof.
+          VISUAL=0
+          for i in $(seq 1 20); do
+            FRAME_URL="${STREAM_BASE}frame.jpg?token=$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$STREAM_TOKEN")&t=$(date +%s%N)"
+            curl -fsS --max-time 20 "$FRAME_URL" -o /tmp/recroom-proof/recroom-frame.jpg
+            METRICS="$(python - <<'PY'
+          from PIL import Image, ImageStat
+          im=Image.open('/tmp/recroom-proof/recroom-frame.jpg').convert('RGB')
+          stat=ImageStat.Stat(im)
+          mean=sum(stat.mean)/3
+          extrema=im.getextrema()
+          spread=max(hi-lo for lo,hi in extrema)
+          print(f'{mean:.3f} {spread} {im.width}x{im.height}')
+          PY
+          )"
+            echo "frame[$i] $METRICS"
+            MEAN="$(awk '{print $1}' <<<"$METRICS")"
+            SPREAD="$(awk '{print $2}' <<<"$METRICS")"
+            if awk -v m="$MEAN" -v s="$SPREAD" 'BEGIN { exit !(m > 2.0 || s > 12) }'; then
+              VISUAL=1
+              cp /tmp/recroom-proof/recroom-frame.jpg /tmp/recroom-proof/recroom-gameplay-proof.jpg
+              break
+            fi
+            sleep 5
+          done
+          test "$VISUAL" = '1'
+          echo 'RECROOM_VISIBLE_RENDERING=true'
+
+          # Audio is a continuous Ogg/Opus stream. A short read should yield an
+          # Ogg header even if the game happens to be silent at this exact moment.
+          set +e
+          curl -sS --max-time 4 \
+            "${STREAM_BASE}audio.ogg?token=$(python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$STREAM_TOKEN")" \
+            -o /tmp/recroom-proof/audio.ogg
+          set -e
+          test -s /tmp/recroom-proof/audio.ogg
+          python - <<'PY'
+          data=open('/tmp/recroom-proof/audio.ogg','rb').read(64)
+          assert data.startswith(b'OggS'), data[:16]
+          PY
+          echo 'RECROOM_AUDIO_STREAM_READY=true'
+          echo 'RECROOM_GAMEPLAY_E2E=true'
+
+      - name: Upload gameplay proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recroom-live-gameplay-proof
+          path: |
+            /tmp/recroom-proof/recroom-gameplay-proof.jpg
+            /tmp/recroom-proof/recroom-frame.jpg
+            /tmp/recroom-proof/input.json
+          if-no-files-found: ignore
+          retention-days: 1
