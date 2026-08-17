@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
-      - name: Download exact May 19 2022 metadata and extract pin blobs
+      - name: Download exact May 19 2022 metadata and extract mapped pin fields
         shell: bash
         run: |
           set -euo pipefail
@@ -24,9 +24,14 @@ jobs:
           from pathlib import Path
           import base64, hashlib
           b=Path('global-metadata.dat').read_bytes()
-          for i,off in enumerate((0xD8F746,0xD8F766),1):
+          fields=(
+            ('EFD02F55B1976F89B55943AD4F81C2A1B7017AE2',0xDC8BC8),
+            ('021AD871B6E062B1BAC3A4CBA57B4783B5D04C86',0xDB4BA8),
+          )
+          for i,(name,off) in enumerate(fields,1):
               x=b[off:off+32]
               assert len(x)==32
+              print(f'PIN{i}_FIELD={name}')
               print(f'PIN{i}_HEX={x.hex()}')
               print(f'PIN{i}_B64={base64.b64encode(x).decode()}')
           print('metadata_sha256='+hashlib.sha256(b).hexdigest())
