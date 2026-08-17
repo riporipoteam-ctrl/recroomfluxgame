@@ -39,11 +39,18 @@ jobs:
             -o dumper.zip
           mkdir dumper out
           unzip -q dumper.zip -d dumper
-          echo '=== DUMPER FILES ==='
-          find dumper -maxdepth 2 -type f -printf '%p\n' | sort
           dll="$(find dumper -type f -name 'Il2CppDumper.dll' | head -1)"
           test -n "$dll"
-          dotnet "$dll" "$PWD/GameAssembly.dll" "$PWD/global-metadata.dat" "$PWD/out" | tee il2cppdumper.log
+          set +e
+          dotnet "$dll" "$PWD/GameAssembly.dll" "$PWD/global-metadata.dat" "$PWD/out" 2>&1 | tee il2cppdumper.log
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "Il2CppDumper exit=$code"
+          # v6.7.46 finishes all outputs, then calls Console.ReadKey(). On a
+          # redirected/headless runner that final prompt aborts with exit 134.
+          # Treat it as harmless only when the dump is actually complete.
+          test -s out/dump.cs
+          test -s out/script.json
           find out -maxdepth 2 -type f -printf '%p %s bytes\n' | sort | head -100
 
       - name: Extract nameserver and service contract
@@ -67,12 +74,12 @@ jobs:
               except Exception: continue
               for i,line in enumerate(lines):
                   if not needles.search(line): continue
-                  lo=max(0,i-12); hi=min(len(lines),i+30)
+                  lo=max(0,i-14); hi=min(len(lines),i+36)
                   block='\n'.join(f'{j+1}: {lines[j]}' for j in range(lo,hi))
                   chunks.append(f'\n===== {path} around line {i+1} =====\n{block}')
           text='\n'.join(chunks)
           Path('nameserver-contract-findings.txt').write_text(text,encoding='utf-8')
-          print(text[:100000])
+          print(text[:120000])
           print('FINDING_BLOCKS=',len(chunks))
           PY
 
@@ -85,5 +92,6 @@ jobs:
             il2cppdumper.log
             out/dump.cs
             out/stringliteral.json
+            out/script.json
           if-no-files-found: warn
           retention-days: 3
