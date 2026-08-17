@@ -1,0 +1,90 @@
+name: Decompile April 8 2020 RecNet
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/decompile-apr8-2020-recnet.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  decompile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Download April 8 2020 archive and extract managed networking assemblies
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://archive.recagain.site/download/2020-04-08T06-56-55Z'
+          curl -fL --retry 2 --max-time 420 --progress-bar "$url" -o build.zip
+          echo "ZIP_BYTES=$(stat -c%s build.zip)"
+          python3 - <<'PY'
+          import zipfile, pathlib
+          z=zipfile.ZipFile('build.zip')
+          names=z.namelist()
+          print('ZIP_ENTRIES=',len(names))
+          matches=[]
+          for n in names:
+              low=n.lower()
+              if ('assembly-csharp' in low or '/managed/' in low and (low.endswith('.dll') or low.endswith('.config')) or low.endswith('recroom_release.exe') or low.endswith('recroom.exe')):
+                  print('MATCH_PATH=',n)
+              if low.endswith('assembly-csharp.dll') or ('besthttp' in low and low.endswith('.dll')):
+                  matches.append(n)
+          pathlib.Path('managed').mkdir(exist_ok=True)
+          for n in matches:
+              out=pathlib.Path('managed')/pathlib.Path(n).name
+              out.write_bytes(z.read(n))
+              print('EXTRACTED=',n,'->',out,'SIZE=',out.stat().st_size)
+          if not any(p.name.lower()=='assembly-csharp.dll' for p in pathlib.Path('managed').glob('*')):
+              raise SystemExit('Assembly-CSharp.dll not found in ZIP')
+          PY
+          sha256sum managed/* || true
+
+      - name: Search managed code for RecNet TLS verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          dll='managed/Assembly-CSharp.dll'
+          echo '===== ASCII/UTF16 STRINGS ====='
+          strings -a "$dll" | grep -E -i 'ns\.rec\.net|CertificateVerify|ICertificateVerify|AlwaysValid|BestHTTP|RecNet|public.?key|sha.?256' | head -250 || true
+          strings -el "$dll" | grep -E -i 'ns\.rec\.net|CertificateVerify|ICertificateVerify|AlwaysValid|BestHTTP|RecNet|public.?key|sha.?256' | head -250 || true
+          python3 -m pip install -q dnfile dncil
+          python3 - <<'PY'
+          import dnfile, pathlib, re
+          path='managed/Assembly-CSharp.dll'
+          pe=dnfile.dnPE(path)
+          print('HAS_DOTNET=',bool(pe.net))
+          if pe.net and pe.net.mdtables:
+              for row in pe.net.mdtables.TypeDef.rows:
+                  ns=str(row.TypeNamespace or '')
+                  name=str(row.TypeName or '')
+                  full=(ns+'.'+name).strip('.')
+                  low=full.lower()
+                  if any(k in low for k in ('certificate','verify','recnet','besthttp','nameserver','connection')):
+                      print('TYPE=',full)
+          # Scan user string heap for networking/security terms.
+          us=getattr(pe.net.metadata.streams, 'get', lambda x:None)('#US') if pe.net else None
+          if us:
+              data=bytes(us.__data__)
+              text=data.decode('utf-16le','ignore')
+              for m in re.finditer(r'.{0,120}(ns\.rec\.net|certificate|verify|recnet|sha256|public key).{0,180}',text,re.I):
+                  print('USERSTRING=',m.group(0).replace('\x00',' '))
+          PY
+
+      - name: Decompile Assembly-CSharp
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet tool install --global ilspycmd >/dev/null 2>&1 || dotnet tool update --global ilspycmd >/dev/null 2>&1 || true
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          mkdir -p decompiled
+          ilspycmd -p -o decompiled managed/Assembly-CSharp.dll >/tmp/ilspy.out 2>/tmp/ilspy.err || true
+          echo '===== ILSPY STDERR ====='
+          tail -80 /tmp/ilspy.err || true
+          echo '===== VERIFIER SOURCE HITS ====='
+          grep -RniE 'ICertificateVerifyer|CustomCertificateVerifyer|CertificateVerify|AlwaysValidVerifyer|ns\.rec\.net|RecNet|SHA256|GetPublicKey' decompiled --include='*.cs' | head -400 || true
+          echo '===== CANDIDATE FILES ====='
+          grep -RliE 'ICertificateVerifyer|CertificateVerify|ns\.rec\.net|GetPublicKey' decompiled --include='*.cs' | head -80 || true
