@@ -13,7 +13,7 @@ permissions:
 jobs:
   recover:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/setup-dotnet@v4
         with:
@@ -26,7 +26,6 @@ jobs:
           base='https://archive.recagain.site/2022-05-19T06-50-09Z'
           curl -fsSL --connect-timeout 15 --max-time 300 -A 'RipoTeam-May2022-IL2CPP/1.0' "$base/GameAssembly.dll" -o GameAssembly.dll
           curl -fsSL --connect-timeout 15 --max-time 300 -A 'RipoTeam-May2022-IL2CPP/1.0' "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o global-metadata.dat
-          sha256sum GameAssembly.dll global-metadata.dat
           test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
           test "$(sha256sum global-metadata.dat | cut -d' ' -f1)" = 'd77f3728ba1f3765941f90de036f6b283301c156db3d7e31932e56c9b06a9b0c'
 
@@ -35,25 +34,22 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL --connect-timeout 15 --max-time 120 \
-            'https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net6-v6.7.46.zip' \
-            -o dumper.zip
+            'https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net6-v6.7.46.zip' -o dumper.zip
           mkdir dumper out
           unzip -q dumper.zip -d dumper
           dll="$(find dumper -type f -name 'Il2CppDumper.dll' | head -1)"
           test -n "$dll"
           set +e
-          dotnet "$dll" "$PWD/GameAssembly.dll" "$PWD/global-metadata.dat" "$PWD/out" 2>&1 | tee il2cppdumper.log
-          code=${PIPESTATUS[0]}
+          dotnet "$dll" "$PWD/GameAssembly.dll" "$PWD/global-metadata.dat" "$PWD/out" >il2cppdumper.log 2>&1
+          code=$?
           set -e
           echo "Il2CppDumper exit=$code"
-          # v6.7.46 finishes all outputs, then calls Console.ReadKey(). On a
-          # redirected/headless runner that final prompt aborts with exit 134.
-          # Treat it as harmless only when the dump is actually complete.
+          # v6.7.46 may abort only after it has written all output because its
+          # final Console.ReadKey() has no TTY. The dump itself is authoritative.
           test -s out/dump.cs
           test -s out/script.json
-          find out -maxdepth 2 -type f -printf '%p %s bytes\n' | sort | head -100
 
-      - name: Extract nameserver and service contract
+      - name: Extract only nameserver-related declarations
         shell: bash
         run: |
           set -euo pipefail
@@ -61,37 +57,31 @@ jobs:
           from pathlib import Path
           import re
 
-          roots=[Path('out'),Path('.')]
-          files=[]
-          for root in roots:
-              if root.exists():
-                  files += [p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in {'.cs','.json','.txt','.py'}]
-
-          needles=re.compile(r'(?i)(nameserver|ns\.rec\.net|recnet|rec\.net|serviceurl|apiurl|authurl|account|matchmaking|photon|leaderboard|commerce|economy|notification|discovery)')
-          chunks=[]
-          for path in files:
-              try: lines=path.read_text(errors='replace').splitlines()
-              except Exception: continue
-              for i,line in enumerate(lines):
-                  if not needles.search(line): continue
-                  lo=max(0,i-14); hi=min(len(lines),i+36)
-                  block='\n'.join(f'{j+1}: {lines[j]}' for j in range(lo,hi))
-                  chunks.append(f'\n===== {path} around line {i+1} =====\n{block}')
-          text='\n'.join(chunks)
+          path=Path('out/dump.cs')
+          lines=path.read_text(errors='replace').splitlines()
+          exact=re.compile(r'(?i)(NameServer|RecNet.*Config|Config.*RecNet|Service.*Url|Url.*Service|ApiUrl|AuthUrl|Accounts?Url|Rooms?Url|Matchmaking.*Url|Photon.*Url|Leaderboard.*Url|Commerce.*Url|Economy.*Url|Discovery.*Url|Notification.*Url)')
+          hit_indexes=[i for i,line in enumerate(lines) if exact.search(line)]
+          # Collapse neighboring hits so we get complete class declarations without a giant dump.
+          ranges=[]
+          for i in hit_indexes:
+              lo=max(0,i-30); hi=min(len(lines),i+80)
+              if ranges and lo <= ranges[-1][1]+20:
+                  ranges[-1]=(ranges[-1][0],max(ranges[-1][1],hi))
+              else:
+                  ranges.append((lo,hi))
+          out=[]
+          for lo,hi in ranges:
+              out.append(f'===== dump.cs lines {lo+1}-{hi} =====')
+              out.extend(f'{j+1}: {lines[j]}' for j in range(lo,hi))
+          text='\n'.join(out)
           Path('nameserver-contract-findings.txt').write_text(text,encoding='utf-8')
-          print(text[:120000])
-          print('FINDING_BLOCKS=',len(chunks))
+          print(text[:160000])
+          print('HITS=',len(hit_indexes),'RANGES=',len(ranges))
           PY
 
-      - name: Upload contract findings
+      - name: Upload compact contract findings
         uses: actions/upload-artifact@v4
         with:
           name: may2022-nameserver-contract
-          path: |
-            nameserver-contract-findings.txt
-            il2cppdumper.log
-            out/dump.cs
-            out/stringliteral.json
-            out/script.json
-          if-no-files-found: warn
+          path: nameserver-contract-findings.txt
           retention-days: 3
