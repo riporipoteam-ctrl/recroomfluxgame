@@ -1,0 +1,34 @@
+name: Xref May 2022 Legacy TLS Client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/xref-may2022-legacy-tls-client.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xref:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Download exact GameAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
+          test "$(sha256sum GameAssembly.dll | cut -d' ' -f1)" = '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27'
+      - name: Find all calls that construct LegacyTlsClient
+        shell: bash
+        run: |
+          set -euo pipefail
+          objdump -d -Mintel GameAssembly.dll > /tmp/all.asm
+          echo '===== xrefs to LegacyTlsClient ctor 0x1828439b0 ====='
+          grep -B35 -A45 -E 'call[[:space:]]+0x1828439b0' /tmp/all.asm || true
+          echo '===== xrefs to HTTPRequest get_CustomCertificateVerifyer 0x180574250 ====='
+          grep -B25 -A35 -E 'call[[:space:]]+0x180574250' /tmp/all.asm || true
+          echo '===== xrefs to HTTPManager get_DefaultCertificateVerifyer 0x182e1b7a0 ====='
+          grep -B25 -A35 -E 'call[[:space:]]+0x182e1b7a0' /tmp/all.asm || true
