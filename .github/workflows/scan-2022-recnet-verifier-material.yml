@@ -1,0 +1,74 @@
+name: Scan 2022 RecNet verifier material
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/scan-2022-recnet-verifier-material.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - date: '2022-05-12T06-50-19Z'
+          - date: '2022-04-28T06-50-43Z'
+          - date: '2022-04-21T06-50-40Z'
+    steps:
+      - name: Download archived IL2CPP files
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://archive.recagain.site/${{ matrix.build.date }}"
+          curl -fsSL --retry 3 --max-time 240 "$base/GameAssembly.dll" -o GameAssembly.dll
+          curl -fsSL --retry 3 --max-time 120 "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o global-metadata.dat
+          echo "BUILD=${{ matrix.build.date }}"
+          sha256sum GameAssembly.dll global-metadata.dat
+          python3 - <<'PY'
+          from pathlib import Path
+          b=Path('global-metadata.dat').read_bytes()
+          pins=[
+            bytes.fromhex('a7461e4bd2d01f98d5ff780d6eb6b2662384d38cbc4c50835d8977a3e90f13e0'),
+            bytes.fromhex('cb80e833e6da1db731cfd19041d739b3a8fbb1da89a96bd46246b80e8ffa0053'),
+          ]
+          for i,p in enumerate(pins,1):
+            print(f'MAY19_PIN{i}_RAW_COUNT={b.count(p)}')
+          print('LEGACY_NS_LITERAL_COUNT=',b.count(b'https://ns.rec.net/?v=2'))
+          PY
+
+      - name: Dump verifier types
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git dumper
+          dotnet build dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
+          exe=$(find dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1)
+          mkdir -p out
+          cp GameAssembly.dll global-metadata.dat out/
+          (cd out && DOTNET_ROLL_FORWARD=Major dotnet "$GITHUB_WORKSPACE/$exe" GameAssembly.dll global-metadata.dat) || true
+          test -s out/dump.cs
+          python3 - <<'PY'
+          import re
+          text=open('out/dump.cs',encoding='utf-8',errors='ignore').read()
+          lines=text.splitlines()
+          hits=[]
+          for i,line in enumerate(lines):
+            if ('ICertificateVerifyer' in line or 'AlwaysValidVerifyer' in line or
+                'CustomCertificateVerifyer' in line or re.search(r'\bIsValid\s*\(',line)):
+              hits.append(i)
+          print('VERIFIER_HIT_COUNT=',len(hits))
+          seen=set()
+          for i in hits:
+            lo=max(0,i-5); hi=min(len(lines),i+7)
+            block='\n'.join(lines[lo:hi])
+            if block in seen: continue
+            seen.add(block)
+            print('--- VERIFIER BLOCK ---')
+            print(block)
+          PY
