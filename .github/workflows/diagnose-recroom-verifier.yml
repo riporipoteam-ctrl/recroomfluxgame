@@ -1,0 +1,84 @@
+name: Diagnose Rec Room TLS verifier
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download exact May 19 2022 IL2CPP files
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/GameAssembly.dll' -o GameAssembly.dll
+          curl -fsSL --retry 3 --max-time 300 'https://archive.recagain.site/2022-05-19T06-50-09Z/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat' -o global-metadata.dat
+          echo '2ba4571be2791602386bf02581805e021568ccfeacce6cd265450974b7ea8f27  GameAssembly.dll' | sha256sum -c -
+          test -s global-metadata.dat
+
+      - name: Build and run Il2CppDumper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v6.7.46 https://github.com/Perfare/Il2CppDumper.git /tmp/Il2CppDumper
+          dotnet build /tmp/Il2CppDumper/Il2CppDumper/Il2CppDumper.csproj -c Release --nologo
+          mkdir -p out
+          DLL=$(find /tmp/Il2CppDumper/Il2CppDumper/bin/Release -name 'Il2CppDumper.dll' | head -1)
+          dotnet "$DLL" "$GITHUB_WORKSPACE/GameAssembly.dll" "$GITHUB_WORKSPACE/global-metadata.dat" "$GITHUB_WORKSPACE/out" || true
+          find out -maxdepth 2 -type f -printf '%p %s bytes\n' | sort
+
+      - name: Resolve verifier types and RecNet method
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '===== Certificate verifier declarations ====='
+          grep -n -B8 -A30 -E 'ICertificateVerifyer|AlwaysValidVerifyer|CustomCertificateVerifyer|DefaultCertificate' out/dump.cs | head -1200 || true
+
+          echo '===== Script entries around 0x182b6f000..0x182b71600 ====='
+          python3 - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('out/script.json')
+          if not p.exists():
+              print('script.json missing')
+              raise SystemExit(0)
+          data=json.loads(p.read_text(errors='replace'))
+          lo=0x182b6f000; hi=0x182b71600
+          def walk(x):
+              if isinstance(x, dict):
+                  addr=x.get('Address')
+                  if isinstance(addr, str):
+                      try: addr=int(addr,0)
+                      except: addr=None
+                  if isinstance(addr, int) and lo <= addr <= hi:
+                      print(json.dumps(x, ensure_ascii=False))
+                  for v in x.values(): walk(v)
+              elif isinstance(x, list):
+                  for v in x: walk(v)
+          walk(data)
+          PY
+
+          echo '===== Xrefs to request+0xe0 source region ====='
+          objdump -d -Mintel --start-address=0x182b6f980 --stop-address=0x182b6fb20 GameAssembly.dll
+
+          echo '===== Nearby dump.cs RVA matches ====='
+          grep -n -B5 -A18 -Ei 'RVA: 0x2b6f|Offset: 0x2b6f|VA: 0x182b6f|RVA: 0x2b70|VA: 0x182b70' out/dump.cs | head -1200 || true
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: recroom-verifier-diagnostics
+          path: |
+            out/dump.cs
+            out/script.json
+            out/il2cpp.h
+          if-no-files-found: warn
+          retention-days: 1
