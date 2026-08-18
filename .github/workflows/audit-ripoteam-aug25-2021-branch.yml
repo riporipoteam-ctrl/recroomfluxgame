@@ -7,19 +7,23 @@ on:
     paths: ['.github/workflows/audit-ripoteam-aug25-2021-branch.yml']
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   audit:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
       - name: Clone exact server branch
         shell: bash
         run: |
           set -euo pipefail
           git clone -q --depth 1 --branch recroom-aug25-2021 https://github.com/riporipoteam-ctrl/ripoteamserver.git server
-      - name: Compile changed Python modules
+          git -C server rev-parse HEAD > /tmp/server-sha
+      - name: Compile and validate Aug 2021 branch
+        id: audit
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -31,10 +35,6 @@ jobs:
             server/hf-space/recroom_2021_metadata_locator.py \
             server/hf-space/recroom_build_fingerprint.py \
             server/hf-space/recroom_https_recnet_fix.py
-      - name: Validate 2021 target invariants
-        shell: bash
-        run: |
-          set -euo pipefail
           python3 - <<'PY'
           import json, pathlib
           root=pathlib.Path('server')
@@ -47,6 +47,8 @@ jobs:
           autoload=(root/'hf-space/recroom_autoload.py').read_text()
           assert '2021-08-25T06-50-15Z' in autoload
           assert '20210827_prod' in autoload
+          assert 'recroom_2021_archive_attestation' in autoload
+          assert 'recroom_2021_metadata_locator' in autoload
           transport=(root/'hf-space/recroom_https_recnet_fix.py').read_text()
           assert 'public-https-bootstrap-public-https-services-aug25-2021-v2' in transport
           assert 'recNetTlsVerificationBypassed' in transport and 'False' in transport
@@ -67,3 +69,24 @@ jobs:
             assert '2019-' not in text, path
           print('AUG25_2021_BRANCH_AUDIT=true')
           PY
+      - name: Persist audit result
+        if: always()
+        shell: bash
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          {
+            echo "AUDIT_OUTCOME=$AUDIT_OUTCOME"
+            echo "SERVER_SHA=$(cat /tmp/server-sha 2>/dev/null || echo unavailable)"
+            echo "TARGET_BUILD=7225744"
+            echo "TARGET_MANIFEST=7611535694620830622"
+          } > diagnostics/aug25-2021-branch-audit.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/aug25-2021-branch-audit.txt
+          git commit -m 'Record Aug 25 2021 branch audit result' || exit 0
+          git pull --rebase origin main
+          git push
+          test "$AUDIT_OUTCOME" = success
