@@ -1,0 +1,58 @@
+name: Probe live Aug 25 2021 RipoTeam capability
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/probe-live-aug25-2021.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture live capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          curl -fsS --max-time 30 -H 'Cache-Control: no-cache' \
+            "https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/capabilities?ts=$(date +%s)" \
+            -o diagnostics/live-aug25-2021-capability.json
+          python3 -m json.tool diagnostics/live-aug25-2021-capability.json > /tmp/pretty.json
+          mv /tmp/pretty.json diagnostics/live-aug25-2021-capability.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('diagnostics/live-aug25-2021-capability.json'))
+          print(json.dumps({
+            'targetBuild':p.get('targetBuild'),
+            'targetManifest':p.get('targetManifest'),
+            'targetFingerprint':p.get('targetFingerprint'),
+            'exactBuild':p.get('exactBuild'),
+            'checks':p.get('checks'),
+            'clientFingerprint':p.get('clientFingerprint'),
+            'readyForGame':p.get('readyForGame'),
+            'reason':p.get('reason'),
+            'recNetTransport':p.get('recNetTransport'),
+            'recNetPublicBootstrap':p.get('recNetPublicBootstrap'),
+            'recNetLocalServiceScheme':p.get('recNetLocalServiceScheme'),
+            'recNetPublicServiceRelay':p.get('recNetPublicServiceRelay'),
+            'recNetTlsVerificationBypassed':p.get('recNetTlsVerificationBypassed'),
+            'lastGraphicsFailure':p.get('lastGraphicsFailure'),
+          }, indent=2))
+          PY
+      - name: Commit snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/live-aug25-2021-capability.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Record live Aug 25 2021 capability snapshot'
+          git pull --rebase origin main
+          git push
