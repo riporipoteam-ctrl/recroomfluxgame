@@ -33,12 +33,19 @@ jobs:
           base='https://archive.recagain.site/${{ matrix.build.date }}'
           out='diagnostics/verifier-${{ matrix.build.id }}.txt'
           printf 'DATE=${{ matrix.build.date }}\nBUILD=${{ matrix.build.id }}\nMANIFEST=${{ matrix.build.manifest }}\n' > "$out"
-          url="$base/RecRoom_Data/Managed/Assembly-CSharp.dll"
-          if ! curl -fsSL --retry 2 --max-time 120 "$url" -o /tmp/managed/Assembly-CSharp.dll; then
+          found=''
+          for rel in \
+            'Recroom_Release_Data/Managed/Assembly-CSharp.dll' \
+            'RecRoom_Release_Data/Managed/Assembly-CSharp.dll' \
+            'RecRoom_Data/Managed/Assembly-CSharp.dll'; do
+            if curl -fsSL --retry 1 --max-time 120 "$base/$rel" -o /tmp/managed/Assembly-CSharp.dll; then found="$rel"; break; fi
+          done
+          if [ -z "$found" ]; then
             echo 'DIRECT_MANAGED_DOWNLOAD_FAILED=true' >> "$out"
             cat "$out"
             exit 0
           fi
+          echo "ASSEMBLY_PATH=$found" >> "$out"
           echo "ASSEMBLY_SIZE=$(stat -c%s /tmp/managed/Assembly-CSharp.dll)" >> "$out"
           sha256sum /tmp/managed/Assembly-CSharp.dll | awk '{print "ASSEMBLY_SHA256="$1}' >> "$out"
           dotnet tool install --global ilspycmd >/dev/null 2>&1 || dotnet tool update --global ilspycmd >/dev/null 2>&1 || true
