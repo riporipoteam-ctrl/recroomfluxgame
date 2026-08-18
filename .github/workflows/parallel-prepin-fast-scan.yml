@@ -1,0 +1,68 @@
+name: Parallel fast scan for pre-pin 2022 Rec Room
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/parallel-prepin-fast-scan.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - { date: '2022-04-15T06-50-51Z', id: '8538723', manifest: '5074805288827523797' }
+          - { date: '2022-04-08T06-52-23Z', id: '8504784', manifest: '3300297416944352195' }
+          - { date: '2022-03-30T06-50-13Z', id: '8442185', manifest: '4860694567153974568' }
+          - { date: '2022-03-23T06-55-51Z', id: '8400677', manifest: '6498111350645449747' }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dump and inspect verifier classes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git /tmp/dumper
+          dotnet build /tmp/dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
+          exe=$(find /tmp/dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1)
+          mkdir -p /tmp/out diagnostics
+          base='https://archive.recagain.site/${{ matrix.build.date }}'
+          curl -fsSL --retry 2 --max-time 180 "$base/GameAssembly.dll" -o /tmp/out/GameAssembly.dll
+          curl -fsSL --retry 2 --max-time 120 "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o /tmp/out/global-metadata.dat
+          set +e
+          (cd /tmp/out && DOTNET_ROLL_FORWARD=Major dotnet "$exe" GameAssembly.dll global-metadata.dat >/tmp/dumper.log 2>&1)
+          set -e
+          dump=$(find /tmp/dumper /tmp/out -name dump.cs -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+          test -n "$dump"
+          python3 - "$dump" <<'PY' > 'diagnostics/verifier-${{ matrix.build.id }}.txt'
+          import sys,re
+          text=open(sys.argv[1],errors='replace').read()
+          classes=[m.group(1).strip() for m in re.finditer(r'(?m)^public class ([^\r\n:{]+).*: ICertificateVerifyer\b.*$',text)]
+          custom=[c for c in classes if 'AlwaysValidVerifyer' not in c]
+          print('DATE=${{ matrix.build.date }}')
+          print('BUILD=${{ matrix.build.id }}')
+          print('MANIFEST=${{ matrix.build.manifest }}')
+          print('ICERTIFICATEVERIFYER_CLASS_COUNT='+str(len(classes)))
+          for c in classes: print('VERIFIER_CLASS='+c)
+          print('CUSTOM_VERIFIER_COUNT='+str(len(custom)))
+          print('RESULT=' + ('CUSTOM_VERIFIER_PRESENT' if custom else 'NO_CUSTOM_VERIFIER_CLASS'))
+          PY
+          cat 'diagnostics/verifier-${{ matrix.build.id }}.txt'
+      - name: Persist this result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'diagnostics/verifier-${{ matrix.build.id }}.txt'
+          git commit -m 'Record verifier scan for build ${{ matrix.build.id }}'
+          for n in 1 2 3 4; do
+            git pull --rebase origin main && git push && exit 0
+            sleep 2
+          done
+          exit 1
