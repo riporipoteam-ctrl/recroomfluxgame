@@ -1,7 +1,7 @@
 {
   "result": "failure",
-  "phase": "allocate",
-  "error": "",
+  "phase": "steam-login",
+  "error": "Rec Room could not produce a stable playable frame. | GLX: vendor=Mesa; renderer=llvmpipe (LLVM 19.1.7, 256 bits); core=4.5 (Core Profile) Mesa 25.0.7-2+deb13u1; version=4.5 (Compatibility Profile) Mesa 25.0.7-2+deb13u1 | Vulkan ICD: /usr/share/vulkan/icd.d/lvp_icd.json",
   "capability": {
     "ok": true,
     "provider": "wine",
@@ -31,7 +31,7 @@
     "targetManifest": "7611535694620830622",
     "graphics": "Wine/WineD3D on the Space Linux renderer",
     "prefixBootstrap": "hardened-v3",
-    "prefixBootstrapBound": true,
+    "prefixBootstrapBound": false,
     "wineBinary": "/usr/bin/wine",
     "winebootBinary": "/usr/bin/wineboot",
     "runtimePatch": "render-audio-v3-fast-redirect",
@@ -82,9 +82,34 @@
     }
   },
   "sessionCreate": {
-    "detail": "Unsupported build 'recroom-2021-08-25'."
+    "ok": true,
+    "mode": "remote",
+    "sessionId": "0a6da854-0995-4b60-8c06-f95eb38d8557",
+    "state": "starting",
+    "streamUrl": null,
+    "hostId": "ripo-wine-32e1d893e8734840",
+    "buildId": "recroom-2021-08-25",
+    "expiresAtMs": 1787064266742,
+    "error": null,
+    "sessionAccessToken": "WBuzr3doidzgsGIrLjI6nOoslD96bwdxqnCmEVDveQI",
+    "provider": "ripoteam-wine",
+    "phase": "queued",
+    "progress": 1
   },
-  "sessionStatus": null,
+  "sessionStatus": {
+    "ok": false,
+    "mode": "remote",
+    "sessionId": "0a6da854-0995-4b60-8c06-f95eb38d8557",
+    "state": "failed",
+    "streamUrl": null,
+    "hostId": "ripo-wine-32e1d893e8734840",
+    "buildId": "recroom-2021-08-25",
+    "expiresAtMs": 1787064266742,
+    "error": "Rec Room could not produce a stable playable frame. | GLX: vendor=Mesa; renderer=llvmpipe (LLVM 19.1.7, 256 bits); core=4.5 (Core Profile) Mesa 25.0.7-2+deb13u1; version=4.5 (Compatibility Profile) Mesa 25.0.7-2+deb13u1 | Vulkan ICD: /usr/share/vulkan/icd.d/lvp_icd.json",
+    "provider": "ripoteam-wine",
+    "phase": "preparing-windows-runtime",
+    "progress": 24
+  },
   "captureStatus": null,
   "workflowOutcome": "failure"
 }
