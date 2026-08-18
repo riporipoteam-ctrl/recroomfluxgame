@@ -1,8 +1,8 @@
 {
     "ok": true,
     "provider": "wine",
-    "supported": true,
-    "readyForGame": true,
+    "supported": false,
+    "readyForGame": false,
     "checks": {
         "wine": true,
         "wineboot": true,
@@ -12,19 +12,19 @@
         "pulse": true,
         "python": true,
         "streamWorker": true,
-        "client": true,
-        "manifest": true,
-        "fingerprint": true
+        "client": false,
+        "manifest": false,
+        "fingerprint": false
     },
-    "reason": null,
-    "warning": null,
+    "reason": "server Rec Room client is not installed at /home/user/.ripo-cloud-pc/recroom-client-2022",
+    "warning": "Players never install anything; the server needs one legally obtained May 19 2022 client image before it can launch Rec Room.",
     "runningVms": 0,
     "runningSandboxes": 0,
     "maxVms": 2,
     "maxSandboxes": 2,
     "clientDir": "/home/user/.ripo-cloud-pc/recroom-client-2022",
-    "targetBuild": "8715820",
-    "targetManifest": "2586133705164702202",
+    "targetBuild": "4802887",
+    "targetManifest": "2539899194395389618",
     "graphics": "Wine/WineD3D on the Space Linux renderer",
     "prefixBootstrap": "hardened-v3",
     "prefixBootstrapBound": true,
@@ -35,7 +35,7 @@
     "audioClock": "pulse-null-sink-silence-after-visible-frame",
     "glcoreFallbackDefault": false,
     "fastRedirectPatch": true,
-    "recNetRedirectPatch": "may12-trusted-public-bootstrap-v2",
+    "recNetRedirectPatch": "mar27-2020-trusted-public-bootstrap-v1",
     "recNetRedirectFile": "RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat",
     "recNetDirectUrlScan": false,
     "blackViewportPatch": "black-viewport-v2-real-frame-graphics-probe",
@@ -51,7 +51,7 @@
     "graphicsProbe": "glxinfo-B-per-sandbox",
     "recNetProxyTrace": true,
     "recNetTraceFile": "recnet-proxy.jsonl",
-    "recNetTransport": "trusted-public-https-bootstrap-local-http-may12-v1",
+    "recNetTransport": "trusted-public-https-bootstrap-local-http-mar27-v1",
     "recNetPublicBootstrap": true,
     "recNetBootstrapPath": "/api/recroom-bootstrap/ns",
     "recNetBootstrapBase": "https://echoxr-ripoteam-cloud-pc.hf.space",
@@ -62,141 +62,16 @@
     "recNetTlsVerificationBypassed": false,
     "recNetLoopbackTls": false,
     "failureDiagnosticsPatch": "graphics-failure-diagnostics-v2-tls-uri",
-    "lastGraphicsFailure": {
-        "revision": "graphics-failure-diagnostics-v2-tls-uri",
-        "timestamp": 1787001128.199,
-        "hostId": "ripo-wine-94a822841465483c",
-        "error": "Rec Room could not initialize a stable playable graphics viewport. d3d11-bitblt-llvmpipe: no stable game viewport (mean=1.000 spread=0 nonblack=0.000000); log=OF(String) System.Action`1:Invoke(T) DDLKDBDLBFL:LMFFGJFBFOF(String) RRUI.Data.BIGLKBDEDNK:Dispose() RRUI.Data.Router:PPFAIIFDAIL() (Filename: C:\\buildslave\\unity\\build\\Runtime/Export/Debug/Debug.bindings.h Line: 39) UnloadTime: 14.852800 ms [14:11:28] [6] [6.0764] [Log] [Unity] F 7 SceneLoaded: empty Unloading 462 unused Assets to reduce memory usage. Loaded Objects now: 37112. Total: 51.218500 ms (FindLiveObjects: 1.691200 ms CreateObjectMapping: 1.608600 ms MarkObjects: 41.697200 ms DeleteObjects: 6.220000 ms) [14:11:29] [8] [7.2969] [Log] [Unity] [EAC] Tearing down and releasing runtime Setting up 32 worker threads for Enlighten. Thread -> id: 2d4 -> priority: 1 Thread -> id: 2d8 -> priority: 1 Thread -> id: 2dc -> priority: 1 Thread -> id: 2e0 -> priority: 1 Thread -> id: 2e4 -> priority: 1 Thread -> id: 2ec -> priority: 1 Thread -> id: 2e8 -> priority: 1 Thread -> id: 2f0 -> priority: 1 Thread -> id: 2f4 -> priority: 1 Thread -> id: 2f8 -> priority: 1 Thread -> id: 2fc -> priority: 1 Thread -> id: 300 -> priority: 1 ...",
-        "renderProfile": "glcore-llvmpipe-diagnostic",
-        "renderMetrics": "mean=1.000 spread=0 nonblack=0.000000",
-        "fatalWindow": "Error",
-        "graphics": {
-            "display": ":90",
-            "glxExit": 0,
-            "glx": "vendor=Mesa; renderer=llvmpipe (LLVM 19.1.7, 256 bits); core=4.5 (Core Profile) Mesa 25.0.7-2+deb13u1; version=4.5 (Compatibility Profile) Mesa 25.0.7-2+deb13u1",
-            "glxError": "",
-            "vulkanIcd": "/usr/share/vulkan/icd.d/lvp_icd.json"
-        },
-        "renderEvents": [
-            "render-attempt:d3d11-bitblt-llvmpipe",
-            "render-no-stable-frame:d3d11-bitblt-llvmpipe metrics=mean=1.000 spread=0 nonblack=0.000000",
-            "render-attempt:d3d11-bitblt-native",
-            "render-no-stable-frame:d3d11-bitblt-native metrics=mean=1.000 spread=0 nonblack=0.000000",
-            "render-attempt:d3d11-bitblt-no-singlethreaded-llvmpipe",
-            "render-no-stable-frame:d3d11-bitblt-no-singlethreaded-llvmpipe metrics=mean=1.000 spread=0 nonblack=0.000000",
-            "render-attempt:vulkan-lavapipe",
-            "render-fatal-window:vulkan-lavapipe title=Error",
-            "render-attempt:glcore-llvmpipe-diagnostic",
-            "render-fatal-window:glcore-llvmpipe-diagnostic title=Error"
-        ],
-        "recNet": [
-            "proxy-start 127.0.0.1:81 path=/nsx"
-        ],
-        "profiles": [
-            {
-                "profile": "d3d11-bitblt-llvmpipe",
-                "keyLines": [
-                    "[14:11:24] [0] [0.2709] [Log] [Unity] Camera (RecRoom.Core.Rendering.HolographicOverlayRendererEffect): Expanding cached material property blocks from 0 to 128",
-                    "[14:11:24] [1] [2.0365] [Log] [Unity] Unload VR device: OpenVR",
-                    "[14:11:24] [1] [2.0490] [Log] [Unity] EAC runtime inactive",
-                    "AKLDNLMFBMC:<Send>b__0(HTTPRequest, HTTPResponse)",
-                    "[14:11:28] [5] [6.0199] [Log] [Unity] [EAC] Tearing down and releasing runtime",
-                    "[14:11:28] [6] [6.0596] [Error] [Unity | Error] URI load failed: URILoadRequest disposed before navigation completed.",
-                    "[14:11:28] [6] [6.0602] [Error] [Unity | Error] URILoadRequest disposed before navigation completed.",
-                    "[14:11:29] [8] [7.2969] [Log] [Unity] [EAC] Tearing down and releasing runtime",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol.ProcessRecord (System.Byte protocol, System.Byte[] buf, System.Int32 off, System.Int32 len) [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.RecordStream.ReadRecord () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol.SafeReadRecord () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol.BlockForHandshake () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.HTTPConnection.Connect () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.HTTPConnection.ThreadFunc (System.Object param) [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.Futures.FutureCallback`1[T].Invoke (BestHTTP.Futures.IFuture`1[T] future) [0x00000] in <00000000000000000000000000000000>:0",
-                    "BestHTTP.HTTPRequest:CallCallback()",
-                    "BestHTTP.ConnectionBase:HandleCallback()",
-                    "BestHTTP.HTTPManager:OnUpdate()",
-                    "[14:11:26] [3] [3.3650] [Error] [Unity | Error] RecNet name server query failed (error code: summer): user_canceled(90)",
-                    "[14:11:27] [5] [5.0164] [Error] [Unity | Error] System.InvalidOperationException: Must call Initialize() first."
-                ]
-            },
-            {
-                "profile": "d3d11-bitblt-native",
-                "keyLines": [
-                    "[14:11:38] [0] [0.2450] [Log] [Unity] Camera (RecRoom.Core.Rendering.HolographicOverlayRendererEffect): Expanding cached material property blocks from 0 to 128",
-                    "[14:11:39] [1] [1.9708] [Log] [Unity] Unload VR device: OpenVR",
-                    "[14:11:39] [1] [1.9811] [Log] [Unity] EAC runtime inactive",
-                    "AKLDNLMFBMC:<Send>b__0(HTTPRequest, HTTPResponse)",
-                    "[14:11:41] [5] [4.1531] [Log] [Unity] [EAC] Tearing down and releasing runtime",
-                    "[14:11:42] [6] [5.2011] [Error] [Unity | Error] URI load failed: URILoadRequest disposed before navigation completed.",
-                    "[14:11:42] [6] [5.2016] [Error] [Unity | Error] URILoadRequest disposed before navigation completed.",
-                    "[14:11:42] [8] [5.4278] [Log] [Unity] [EAC] Tearing down and releasing runtime",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol.ProcessRecord (System.Byte protocol, System.Byte[] buf, System.Int32 off, System.Int32 len) [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.RecordStream.ReadRecord () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol.SafeReadRecord () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol.BlockForHandshake () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.HTTPConnection.Connect () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.HTTPConnection.ThreadFunc (System.Object param) [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.Futures.FutureCallback`1[T].Invoke (BestHTTP.Futures.IFuture`1[T] future) [0x00000] in <00000000000000000000000000000000>:0",
-                    "BestHTTP.HTTPRequest:CallCallback()",
-                    "BestHTTP.ConnectionBase:HandleCallback()",
-                    "BestHTTP.HTTPManager:OnUpdate()",
-                    "[14:11:40] [3] [3.1252] [Error] [Unity | Error] RecNet name server query failed (error code: summer): user_canceled(90)",
-                    "[14:11:41] [5] [4.1520] [Error] [Unity | Error] System.InvalidOperationException: Must call Initialize() first."
-                ]
-            },
-            {
-                "profile": "d3d11-bitblt-no-singlethreaded-llvmpipe",
-                "keyLines": [
-                    "[14:11:52] [0] [0.2449] [Log] [Unity] Camera (RecRoom.Core.Rendering.HolographicOverlayRendererEffect): Expanding cached material property blocks from 0 to 128",
-                    "[14:11:52] [1] [2.0551] [Log] [Unity] Unload VR device: OpenVR",
-                    "[14:11:52] [1] [2.0686] [Log] [Unity] EAC runtime inactive",
-                    "AKLDNLMFBMC:<Send>b__0(HTTPRequest, HTTPResponse)",
-                    "[14:11:53] [5] [3.6129] [Log] [Unity] [EAC] Tearing down and releasing runtime",
-                    "[14:11:54] [6] [4.6622] [Error] [Unity | Error] URI load failed: URILoadRequest disposed before navigation completed.",
-                    "[14:11:54] [6] [4.6627] [Error] [Unity | Error] URILoadRequest disposed before navigation completed.",
-                    "[14:11:55] [8] [4.8817] [Log] [Unity] [EAC] Tearing down and releasing runtime",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol.ProcessRecord (System.Byte protocol, System.Byte[] buf, System.Int32 off, System.Int32 len) [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.RecordStream.ReadRecord () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol.SafeReadRecord () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol.BlockForHandshake () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.HTTPConnection.Connect () [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.HTTPConnection.ThreadFunc (System.Object param) [0x00000] in <00000000000000000000000000000000>:0",
-                    "at BestHTTP.Futures.FutureCallback`1[T].Invoke (BestHTTP.Futures.IFuture`1[T] future) [0x00000] in <00000000000000000000000000000000>:0",
-                    "BestHTTP.HTTPRequest:CallCallback()",
-                    "BestHTTP.ConnectionBase:HandleCallback()",
-                    "BestHTTP.HTTPManager:OnUpdate()",
-                    "[14:11:53] [3] [3.2107] [Error] [Unity | Error] RecNet name server query failed (error code: summer): user_canceled(90)",
-                    "[14:11:53] [5] [3.6120] [Error] [Unity | Error] System.InvalidOperationException: Must call Initialize() first."
-                ]
-            },
-            {
-                "profile": "vulkan-lavapipe",
-                "keyLines": [
-                    "[ripo] graphics-patch=black-viewport-v2-real-frame-graphics-probe profile=vulkan-lavapipe command=/usr/bin/wine /home/user/.ripo-cloud-pc/recroom-wine/ripo-wine-94a822841465483c/client/RecRoom.exe -screen-fullscreen 0 -screen-width 1280 -screen-height 720 -logFile - -force-vulkan",
-                    "Forcing GfxDevice: Vulkan",
-                    "Forced GfxDevice 'Vulkan' was not built from editor, shaders will not be available",
-                    "InitializeEngineGraphics failed",
-                    "PlayerInitEngineGraphics: InitializeEngineGraphics failed"
-                ]
-            },
-            {
-                "profile": "glcore-llvmpipe-diagnostic",
-                "keyLines": [
-                    "[ripo] graphics-patch=black-viewport-v2-real-frame-graphics-probe profile=glcore-llvmpipe-diagnostic command=/usr/bin/wine /home/user/.ripo-cloud-pc/recroom-wine/ripo-wine-94a822841465483c/client/RecRoom.exe -screen-fullscreen 0 -screen-width 1280 -screen-height 720 -logFile - -force-glcore -force-clamped",
-                    "Forcing GfxDevice: OpenGL Core",
-                    "Forced GfxDevice 'OpenGL Core' was not built from editor, shaders will not be available",
-                    "InitializeEngineGraphics failed",
-                    "PlayerInitEngineGraphics: InitializeEngineGraphics failed"
-                ]
-            }
-        ]
-    },
-    "exactBuild": true,
-    "targetFingerprint": "f7737eba9ec2e4cc7f6049835db238a23d18a9a1298ad0186d893d9699d665f1",
+    "lastGraphicsFailure": null,
+    "exactBuild": false,
+    "targetFingerprint": "770cf906f01b9e215c46fb2efc0d0fb3234e29dda0c3444ff109c88c236c341d",
     "clientFingerprint": {
-        "ok": true,
-        "buildId": "8715820",
-        "manifestId": "2586133705164702202",
-        "manifestPresent": true,
-        "mismatches": []
+        "ok": false,
+        "buildId": "4802887",
+        "manifestId": "2539899194395389618",
+        "manifestPresent": false,
+        "mismatches": [
+            "client directory is missing"
+        ]
     }
 }
