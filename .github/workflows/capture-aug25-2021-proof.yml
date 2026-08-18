@@ -1,5 +1,6 @@
 name: Capture Aug 25 2021 Rec Room proof
 
+# Rerun marker: canonical 2021 production playability test 2026-08-18
 on:
   workflow_dispatch:
   push:
@@ -44,7 +45,7 @@ jobs:
           test "$code" = 200
           FIREBASE_TOKEN=$(jq -r '.idToken // empty' /tmp/proof/auth.json); test -n "$FIREBASE_TOKEN"
 
-          code=$(curl -sS --max-time 45 -o /tmp/proof/create.json -w '%{http_code}' -X POST "$SPACE_URL/api/recroom-public/sessions" -H "authorization: Bearer $FIREBASE_TOKEN" -H 'content-type: application/json' --data '{"buildId":"recroom-2022-05-19"}')
+          code=$(curl -sS --max-time 45 -o /tmp/proof/create.json -w '%{http_code}' -X POST "$SPACE_URL/api/recroom-public/sessions" -H "authorization: Bearer $FIREBASE_TOKEN" -H 'content-type: application/json' --data '{"buildId":"recroom-2021-08-25"}')
           test "$code" = 202
           SESSION_ID=$(jq -r '.sessionId // empty' /tmp/proof/create.json)
           ACCESS_TOKEN=$(jq -r '.sessionAccessToken // empty' /tmp/proof/create.json)
