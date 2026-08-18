@@ -1,0 +1,43 @@
+name: Verify March 27 2020 RecNet bootstrap literal
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/check-mar27-bootstrap-literal.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check exact legacy metadata literal
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          url='https://archive.recagain.site/2020-03-27T06-58-55Z/Recroom_Release_Data/il2cpp_data/Metadata/global-metadata.dat'
+          curl -fsSL --retry 2 --max-time 120 "$url" -o /tmp/meta.dat
+          python3 - <<'PY' > diagnostics/mar27-bootstrap-literal.txt
+          b=open('/tmp/meta.dat','rb').read()
+          for s in [b'https://ns.rec.net/?v=2',b'https://ns.rec.net/',b'https://ns.rec.net']:
+              print(s.decode(), 'COUNT='+str(b.count(s)))
+          print('HEADER='+b[:8].hex())
+          import struct
+          print('VERSION='+str(struct.unpack_from('<I',b,4)[0]))
+          PY
+          cat diagnostics/mar27-bootstrap-literal.txt
+      - name: Commit result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/mar27-bootstrap-literal.txt
+          git commit -m 'Record March 27 2020 bootstrap literal check'
+          for n in 1 2 3 4; do git pull --rebase origin main && git push && exit 0; sleep 1; done
+          exit 1
