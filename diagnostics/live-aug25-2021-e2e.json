@@ -1,9 +1,10 @@
 {
-  "result": "failure",
-  "phase": "allocate",
+  "result": "success",
+  "phase": "complete",
   "error": "",
   "targetBuild": "7225744",
   "targetManifest": "7611535694620830622",
+  "brokerBuildId": "recroom-2022-05-19",
   "capability": {
     "ok": true,
     "provider": "wine",
@@ -84,9 +85,42 @@
     }
   },
   "sessionCreate": {
-    "detail": "Unsupported build 'recroom-2021-08-25'."
+    "ok": true,
+    "mode": "remote",
+    "sessionId": "5cd80db1-c0e3-48ba-bcc4-f33245305353",
+    "state": "starting",
+    "streamUrl": null,
+    "hostId": "ripo-wine-aa6f9a5488fc48b8",
+    "buildId": "recroom-2022-05-19",
+    "expiresAtMs": 1787062945833,
+    "error": null,
+    "sessionAccessToken": "jKO9_2T2zuURmH_WoWqsNvutNJ_mWaA8iGIq_yMHk30",
+    "provider": "ripoteam-wine",
+    "phase": "queued",
+    "progress": 1
   },
-  "sessionStatus": null,
-  "captureStatus": null,
-  "workflowOutcome": "failure"
+  "sessionStatus": {
+    "ok": true,
+    "mode": "remote",
+    "sessionId": "5cd80db1-c0e3-48ba-bcc4-f33245305353",
+    "state": "ready",
+    "streamUrl": "https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/stream/ripo-wine-aa6f9a5488fc48b8/?token=kzMqyNzqi2zA8vtT9Ugz3kX5feOMqhjkNUvoj9PHqJI",
+    "hostId": "ripo-wine-aa6f9a5488fc48b8",
+    "buildId": "recroom-2022-05-19",
+    "expiresAtMs": 1787062945833,
+    "error": null,
+    "provider": "ripoteam-wine",
+    "phase": "ready",
+    "progress": 100
+  },
+  "captureStatus": {
+    "ok": true,
+    "captureId": "3e112c2f-38a5-4f5d-b321-a86344969833",
+    "sessionId": "5cd80db1-c0e3-48ba-bcc4-f33245305353",
+    "state": "ready",
+    "ready": true,
+    "contentType": "image/jpeg",
+    "error": null
+  },
+  "workflowOutcome": "success"
 }
