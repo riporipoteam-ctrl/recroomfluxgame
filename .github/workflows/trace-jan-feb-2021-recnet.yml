@@ -50,74 +50,63 @@ jobs:
           cp "$dump" /tmp/out/dump.cs
           python3 -m pip install -q pefile capstone
           python3 - <<'PY' > 'diagnostics/recnet-bootstrap-${{ matrix.build.id }}.txt'
-          import json,re,pefile
+          import json,re,pefile,bisect
           from capstone import Cs,CS_ARCH_X86,CS_MODE_64
           from capstone.x86 import X86_OP_MEM,X86_REG_RIP
           bid='${{ matrix.build.id }}'; date='${{ matrix.build.date }}'; manifest='${{ matrix.build.manifest }}'
-          s=json.load(open('/tmp/out/script.json'))
-          sl=json.load(open('/tmp/out/stringliteral.json'))
-          methods=sorted((int(m.get('Address',0)),str(m.get('Name',''))) for m in (s.get('ScriptMethod') or []) if int(m.get('Address',0) or 0)>0)
-          print('DATE='+date); print('BUILD='+bid); print('MANIFEST='+manifest)
+          s=json.load(open('/tmp/out/script.json')); sl=json.load(open('/tmp/out/stringliteral.json'))
+          pe=pefile.PE('/tmp/rr/GameAssembly.dll'); base=int(pe.OPTIONAL_HEADER.ImageBase)
+          def va(a):
+              a=int(a)
+              return a if a>=base else base+a
+          methods=sorted((va(int(m.get('Address',0))),str(m.get('Name',''))) for m in (s.get('ScriptMethod') or []) if int(m.get('Address',0) or 0)>0)
+          print('DATE='+date); print('BUILD='+bid); print('MANIFEST='+manifest); print(f'IMAGE_BASE={base:#x}')
           targets=[]
           for row in sl:
               v=str(row.get('value') or row.get('Value') or '')
               if 'ns.rec.net' in v:
-                  a=row.get('address',row.get('Address'))
-                  a=int(a,16) if isinstance(a,str) else int(a)
-                  targets.append((a,v))
-                  print(f'NS_LITERAL={v} ADDRESS={a:#x}')
+                  a=row.get('address',row.get('Address')); a=int(a,16) if isinstance(a,str) else int(a); a=va(a)
+                  targets.append((a,v)); print(f'NS_LITERAL={v} ADDRESS={a:#x}')
           dumptext=open('/tmp/out/dump.cs',errors='replace').read()
           print('=== ICertificateVerifyer classes ===')
-          classes=[]
-          for m in re.finditer(r'(?m)^public class ([^\r\n:{]+).*: ICertificateVerifyer\b.*$',dumptext):
-              classes.append(m.group(1).strip())
+          classes=[m.group(1).strip() for m in re.finditer(r'(?m)^public class ([^\r\n:{]+).*: ICertificateVerifyer\b.*$',dumptext)]
           for c in classes: print('VERIFIER_CLASS='+c)
-          pe=pefile.PE('/tmp/rr/GameAssembly.dll'); base=pe.OPTIONAL_HEADER.ImageBase
           md=Cs(CS_ARCH_X86,CS_MODE_64); md.detail=True
-          refs=[]
-          targetset={a for a,_ in targets}
+          refs=[]; targetset={a for a,_ in targets}
           for sec in pe.sections:
               if not (sec.Characteristics & 0x20000000): continue
-              raw=sec.get_data(); va=base+sec.VirtualAddress
-              for ins in md.disasm(raw,va):
+              raw=sec.get_data(); secva=base+int(sec.VirtualAddress)
+              for ins in md.disasm(raw,secva):
                   for op in ins.operands:
                       if op.type==X86_OP_MEM and op.mem.base==X86_REG_RIP:
                           dest=ins.address+ins.size+op.mem.disp
-                          if dest in targetset:
-                              refs.append((ins.address,dest,ins.mnemonic,ins.op_str))
+                          if dest in targetset: refs.append((ins.address,dest,ins.mnemonic,ins.op_str))
           print('NS_XREF_COUNT='+str(len(refs)))
-          addrs=[a for a,_ in methods]
-          import bisect
-          owners=[]
+          addrs=[a for a,_ in methods]; owners=[]
           for addr,dest,mn,op in refs:
-              i=bisect.bisect_right(addrs,addr)-1
-              owner=methods[i] if i>=0 else (0,'UNKNOWN')
-              owners.append(owner)
+              i=bisect.bisect_right(addrs,addr)-1; owner=methods[i] if i>=0 else (0,'UNKNOWN'); owners.append(owner)
               print(f'NS_XREF={addr:#x} OWNER={owner[1]} OWNER_VA={owner[0]:#x} INS={mn} {op}')
-          # Disassemble each unique owner around full start for 1800 bytes.
           seen=set()
           for ova,oname in owners:
               if not ova or ova in seen: continue
-              seen.add(ova)
-              print(f'=== OWNER_DISASM {oname} @ {ova:#x} ===')
+              seen.add(ova); print(f'=== OWNER_DISASM {oname} @ {ova:#x} ===')
               try:
-                  rva=ova-base; off=pe.get_offset_from_rva(rva); code=pe.__data__[off:off+1800]
+                  off=pe.get_offset_from_rva(ova-base); code=pe.__data__[off:off+2200]
                   for ins in md.disasm(code,ova):
                       print(f'{ins.address:#x}: {ins.mnemonic} {ins.op_str}')
-                      if ins.address>ova+1750: break
+                      if ins.address>ova+2150: break
               except Exception as e: print('DISASM_ERROR='+repr(e))
-          # Print verifier IsValid/cctor signatures+addresses and disassemble custom ones.
           print('=== VERIFIER METHODS ===')
           for m in s.get('ScriptMethod') or []:
-              n=str(m.get('Name','')); a=int(m.get('Address',0) or 0)
-              if not a: continue
+              n=str(m.get('Name','')); raw=int(m.get('Address',0) or 0)
+              if not raw: continue
               if any(c+'$$IsValid' in n or c+'$$.cctor' in n for c in classes):
-                  print(f'METHOD={n} VA={a:#x}')
+                  a=va(raw); print(f'METHOD={n} VA={a:#x}')
                   try:
-                      off=pe.get_offset_from_rva(a-base); code=pe.__data__[off:off+1100]
+                      off=pe.get_offset_from_rva(a-base); code=pe.__data__[off:off+1400]
                       for ins in md.disasm(code,a):
                           print(f'{ins.address:#x}: {ins.mnemonic} {ins.op_str}')
-                          if ins.address>a+1050: break
+                          if ins.address>a+1350: break
                   except Exception as e: print('DISASM_ERROR='+repr(e))
           PY
           cat 'diagnostics/recnet-bootstrap-${{ matrix.build.id }}.txt'
@@ -128,6 +117,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add 'diagnostics/recnet-bootstrap-${{ matrix.build.id }}.txt'
-          git commit -m 'Record early 2021 RecNet trace for ${{ matrix.build.id }}'
+          git commit -m 'Record normalized early 2021 RecNet trace for ${{ matrix.build.id }}'
           for n in 1 2 3 4 5; do git pull --rebase origin main && git push && exit 0; sleep 2; done
           exit 1
