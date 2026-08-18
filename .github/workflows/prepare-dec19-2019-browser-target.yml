@@ -1,0 +1,74 @@
+name: Prepare Dec 19 2019 Rec Room browser target
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/prepare-dec19-2019-browser-target.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe archive layout and hash critical files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics /tmp/rr2019
+          base='https://archive.recagain.site/2019-12-19T21-30-25Z'
+          : > diagnostics/dec19-2019-target.txt
+          echo 'BUILD_ID=4504243' >> diagnostics/dec19-2019-target.txt
+          echo 'MANIFEST=5948698735243937255' >> diagnostics/dec19-2019-target.txt
+          for p in \
+            'RecRoom.exe' \
+            'Recroom_Release.exe' \
+            'UnityPlayer.dll' \
+            'GameAssembly.dll' \
+            'RecRoom_Data/Managed/Assembly-CSharp.dll' \
+            'Recroom_Release_Data/Managed/Assembly-CSharp.dll' \
+            'RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat' \
+            'Recroom_Release_Data/il2cpp_data/Metadata/global-metadata.dat'; do
+            safe=$(echo "$p" | tr '/ ' '__')
+            code=$(curl -sS -L --max-time 120 -o "/tmp/rr2019/$safe" -w '%{http_code}' "$base/$p" || true)
+            if [ "$code" = 200 ] && [ -s "/tmp/rr2019/$safe" ]; then
+              size=$(stat -c%s "/tmp/rr2019/$safe")
+              sha=$(sha256sum "/tmp/rr2019/$safe" | awk '{print $1}')
+              echo "FILE=$p SIZE=$size SHA256=$sha" | tee -a diagnostics/dec19-2019-target.txt
+            else
+              rm -f "/tmp/rr2019/$safe"
+              echo "MISSING=$p HTTP=$code" >> diagnostics/dec19-2019-target.txt
+            fi
+          done
+      - name: Decompile managed RecNet and find bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          asm=$(find /tmp/rr2019 -type f -name '*Assembly-CSharp.dll' | head -1 || true)
+          if [ -z "$asm" ]; then echo 'MANAGED_ASSEMBLY=false' >> diagnostics/dec19-2019-target.txt; exit 0; fi
+          echo "MANAGED_ASSEMBLY=$asm" >> diagnostics/dec19-2019-target.txt
+          dotnet tool install --global ilspycmd >/dev/null 2>&1 || dotnet tool update --global ilspycmd >/dev/null 2>&1 || true
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          rm -rf /tmp/decompiled && mkdir /tmp/decompiled
+          ilspycmd -p -o /tmp/decompiled "$asm" >/tmp/ilspy.out 2>/tmp/ilspy.err || true
+          echo '=== RECNET SOURCE HITS ===' >> diagnostics/dec19-2019-target.txt
+          grep -RniE 'ns\.rec\.net|rec\.net|NameServer|RecNet|ICertificateVerifyer|CertificateVerify|CustomCertificate|GetPublicKey|SHA256' /tmp/decompiled --include='*.cs' | head -300 >> diagnostics/dec19-2019-target.txt || true
+          echo '=== URL STRINGS ===' >> diagnostics/dec19-2019-target.txt
+          strings -a "$asm" | grep -E 'https?://[^ ]*rec\.net|ns\.rec\.net' | sort -u | head -120 >> diagnostics/dec19-2019-target.txt || true
+          echo '=== VERIFIER FILES ===' >> diagnostics/dec19-2019-target.txt
+          grep -RliE 'ICertificateVerifyer|CertificateVerifyer|CustomCertificateVerifyer' /tmp/decompiled --include='*.cs' | head -40 >> diagnostics/dec19-2019-target.txt || true
+          cat diagnostics/dec19-2019-target.txt
+      - name: Commit result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/dec19-2019-target.txt
+          git commit -m 'Record Dec 19 2019 browser target analysis'
+          for n in 1 2 3 4 5; do git pull --rebase origin main && git push && exit 0; sleep 2; done
+          exit 1
