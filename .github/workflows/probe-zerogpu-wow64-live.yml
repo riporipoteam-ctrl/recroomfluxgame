@@ -1,0 +1,99 @@
+name: Probe ZeroGPU WoW64 live session
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/probe-zerogpu-wow64-live.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      SPACE_URL: https://echoxr-ripoteam-cloud-pc.hf.space
+      FIREBASE_API_KEY: AIzaSyBV_ev8AVpKwgioPSSWiBYf8UU09bLbWOU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe live session and always record result
+        shell: bash
+        run: |
+          set +e
+          mkdir -p diagnostics /tmp/ripo-probe
+          SESSION_ID=''; ACCESS_TOKEN=''; FIREBASE_TOKEN=''
+          cleanup() {
+            if [ -n "$SESSION_ID" ] && [ -n "$ACCESS_TOKEN" ]; then
+              curl -sS --max-time 20 -X POST "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/release?accessToken=$ACCESS_TOKEN" >/dev/null || true
+            fi
+            if [ -n "$FIREBASE_TOKEN" ]; then
+              curl -sS --max-time 20 -X POST "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$FIREBASE_API_KEY" -H 'content-type: application/json' --data "$(jq -cn --arg t "$FIREBASE_TOKEN" '{idToken:$t}')" >/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          echo '{}' > /tmp/ripo-probe/capability.json
+          echo '{}' > /tmp/ripo-probe/create.json
+          echo '{}' > /tmp/ripo-probe/status.json
+          RESULT='unknown'
+          ERROR=''
+
+          HTTP=$(curl -sS --max-time 30 -o /tmp/ripo-probe/capability.json -w '%{http_code}' -H 'Cache-Control: no-cache' "$SPACE_URL/api/recroom-wine/capabilities?ts=$(date +%s)")
+          if [ "$HTTP" != 200 ]; then
+            RESULT='capability-failed'; ERROR="capability HTTP $HTTP"
+          else
+            TEST_EMAIL="wow64-probe-${GITHUB_RUN_ID}@example.com"
+            TEST_PASSWORD="Rr!$(openssl rand -hex 18)"
+            HTTP=$(curl -sS --max-time 30 -o /tmp/ripo-probe/auth.json -w '%{http_code}' -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" -H 'content-type: application/json' --data "$(jq -cn --arg email "$TEST_EMAIL" --arg password "$TEST_PASSWORD" '{email:$email,password:$password,returnSecureToken:true}')")
+            if [ "$HTTP" != 200 ]; then
+              RESULT='auth-failed'; ERROR="firebase HTTP $HTTP"
+            else
+              FIREBASE_TOKEN=$(jq -r '.idToken // empty' /tmp/ripo-probe/auth.json)
+              HTTP=$(curl -sS --max-time 45 -o /tmp/ripo-probe/create.json -w '%{http_code}' -X POST "$SPACE_URL/api/recroom-public/sessions" -H "authorization: Bearer $FIREBASE_TOKEN" -H 'content-type: application/json' --data '{"buildId":"recroom-2021-08-25"}')
+              SESSION_ID=$(jq -r '.sessionId // empty' /tmp/ripo-probe/create.json)
+              ACCESS_TOKEN=$(jq -r '.sessionAccessToken // empty' /tmp/ripo-probe/create.json)
+              if [ "$HTTP" != 202 ] || [ -z "$SESSION_ID" ] || [ -z "$ACCESS_TOKEN" ]; then
+                RESULT='allocate-failed'; ERROR="allocation HTTP $HTTP"
+              else
+                RESULT='poll-timeout'
+                for i in $(seq 1 75); do
+                  HTTP=$(curl -sS --max-time 20 -o /tmp/ripo-probe/status.json -w '%{http_code}' "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID?accessToken=$ACCESS_TOKEN")
+                  if [ "$HTTP" != 200 ]; then RESULT='status-failed'; ERROR="status HTTP $HTTP"; break; fi
+                  STATE=$(jq -r '.state // empty' /tmp/ripo-probe/status.json)
+                  PHASE=$(jq -r '.phase // empty' /tmp/ripo-probe/status.json)
+                  GAME_READY=$(jq -r '.gameReady // false' /tmp/ripo-probe/status.json)
+                  echo "probe[$i] state=$STATE phase=$PHASE gameReady=$GAME_READY"
+                  if [ "$GAME_READY" = true ]; then RESULT='game-ready'; break; fi
+                  if [ "$PHASE" = steam-login-required ]; then RESULT='steam-login-required'; break; fi
+                  if [ "$STATE" = failed ]; then RESULT='session-failed'; break; fi
+                  sleep 2
+                done
+              fi
+            fi
+          fi
+
+          jq -n \
+            --arg result "$RESULT" \
+            --arg error "$ERROR" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --slurpfile capability /tmp/ripo-probe/capability.json \
+            --slurpfile status /tmp/ripo-probe/status.json \
+            --slurpfile create /tmp/ripo-probe/create.json \
+            '{result:$result,error:$error,runId:$runId,capability:$capability[0],sessionStatus:($status[0] | del(.streamUrl,.sessionAccessToken,.accessToken)),allocation:($create[0] | {sessionId,state,phase,progress,provider,error})}' \
+            > diagnostics/zerogpu-wow64-live.json
+
+          cat diagnostics/zerogpu-wow64-live.json
+
+      - name: Commit probe result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/zerogpu-wow64-live.json
+          git commit -m 'Record ZeroGPU WoW64 live probe' || true
+          git pull --rebase origin main
+          git push
