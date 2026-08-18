@@ -18,7 +18,7 @@ jobs:
       FIREBASE_API_KEY: AIzaSyBV_ev8AVpKwgioPSSWiBYf8UU09bLbWOU
     steps:
       - uses: actions/checkout@v4
-      - name: Verify portable WoW64 and launch canonical 2021 session
+      - name: Launch and capture ZeroGPU WoW64 session
         shell: bash
         run: |
           set -euo pipefail
@@ -36,18 +36,14 @@ jobs:
           trap cleanup EXIT
 
           curl -fsS --max-time 30 -H 'Cache-Control: no-cache' "$SPACE_URL/api/recroom-wine/capabilities?ts=$(date +%s)" -o /tmp/proof/capability.json
-          cat /tmp/proof/capability.json
-          jq -e '.targetBuild == "7225744" and .targetManifest == "7611535694620830622" and .exactBuild == true and .clientFingerprint.attestedFromTrustedArchive == true' /tmp/proof/capability.json >/dev/null
-          jq -e '(.wineBinary // "") | contains("ripo-portable-wine")' /tmp/proof/capability.json >/dev/null
+          jq -e '.targetBuild == "7225744" and .targetManifest == "7611535694620830622" and .exactBuild == true and .clientFingerprint.attestedFromTrustedArchive == true and ((.wineBinary // "") | contains("ripo-portable-wine"))' /tmp/proof/capability.json >/dev/null
 
           TEST_EMAIL="recroom-wow64-${GITHUB_RUN_ID}@example.com"
           TEST_PASSWORD="Rr!$(openssl rand -hex 18)"
-          code=$(curl -sS --max-time 30 -o /tmp/proof/auth.json -w '%{http_code}' -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" -H 'content-type: application/json' --data "$(jq -cn --arg email "$TEST_EMAIL" --arg password "$TEST_PASSWORD" '{email:$email,password:$password,returnSecureToken:true}')")
-          test "$code" = 200
+          curl -fsS --max-time 30 -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" -H 'content-type: application/json' --data "$(jq -cn --arg email "$TEST_EMAIL" --arg password "$TEST_PASSWORD" '{email:$email,password:$password,returnSecureToken:true}')" -o /tmp/proof/auth.json
           FIREBASE_TOKEN=$(jq -r '.idToken // empty' /tmp/proof/auth.json); test -n "$FIREBASE_TOKEN"
 
           code=$(curl -sS --max-time 45 -o /tmp/proof/create.json -w '%{http_code}' -X POST "$SPACE_URL/api/recroom-public/sessions" -H "authorization: Bearer $FIREBASE_TOKEN" -H 'content-type: application/json' --data '{"buildId":"recroom-2021-08-25"}')
-          cat /tmp/proof/create.json
           test "$code" = 202
           SESSION_ID=$(jq -r '.sessionId // empty' /tmp/proof/create.json)
           ACCESS_TOKEN=$(jq -r '.sessionAccessToken // empty' /tmp/proof/create.json)
@@ -58,20 +54,43 @@ jobs:
             curl -fsS --max-time 20 "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID?accessToken=$ACCESS_TOKEN" -o /tmp/proof/status.json
             state=$(jq -r '.state // empty' /tmp/proof/status.json)
             phase=$(jq -r '.phase // empty' /tmp/proof/status.json)
-            progress=$(jq -r '.progress // 0' /tmp/proof/status.json)
-            echo "wow64-proof[$i] state=$state phase=$phase progress=$progress"
+            game_ready=$(jq -r '.gameReady // false' /tmp/proof/status.json)
+            echo "wow64-proof[$i] state=$state phase=$phase gameReady=$game_ready"
             if [ "$state" = failed ]; then RESULT='failed'; break; fi
-            if [ "$state" = ready ]; then RESULT='game-ready'; break; fi
+            if [ "$game_ready" = true ]; then RESULT='game-ready'; break; fi
             if [ "$phase" = steam-login-required ]; then RESULT='steam-login-required'; break; fi
             sleep 3
           done
 
+          CAPTURE_ID=''; SCREENSHOT_BYTES=0; SCREENSHOT_SHA256=''
+          if [ "$RESULT" = steam-login-required ] || [ "$RESULT" = game-ready ]; then
+            code=$(curl -sS --max-time 30 -o /tmp/proof/capture-create.json -w '%{http_code}' -X POST "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures?accessToken=$ACCESS_TOKEN")
+            if [ "$code" = 202 ]; then
+              CAPTURE_ID=$(jq -r '.captureId // empty' /tmp/proof/capture-create.json)
+              for i in $(seq 1 30); do
+                curl -fsS --max-time 20 "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures/$CAPTURE_ID?accessToken=$ACCESS_TOKEN" -o /tmp/proof/capture-status.json
+                cstate=$(jq -r '.state // empty' /tmp/proof/capture-status.json)
+                [ "$cstate" = ready ] && break
+                [ "$cstate" = failed ] && break
+                sleep 2
+              done
+              if jq -e '.state == "ready"' /tmp/proof/capture-status.json >/dev/null 2>&1; then
+                curl -fsS --max-time 30 "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures/$CAPTURE_ID/image?accessToken=$ACCESS_TOKEN" -o /tmp/proof/live.jpg
+                SCREENSHOT_BYTES=$(stat -c '%s' /tmp/proof/live.jpg)
+                SCREENSHOT_SHA256=$(sha256sum /tmp/proof/live.jpg | awk '{print $1}')
+              fi
+            fi
+          fi
+
           jq -n \
             --arg result "$RESULT" \
             --arg runId "$GITHUB_RUN_ID" \
+            --arg captureId "$CAPTURE_ID" \
+            --arg screenshotSha256 "$SCREENSHOT_SHA256" \
+            --argjson screenshotBytes "$SCREENSHOT_BYTES" \
             --slurpfile capability /tmp/proof/capability.json \
             --slurpfile status /tmp/proof/status.json \
-            '{ok:($result=="game-ready" or $result=="steam-login-required"),result:$result,runId:$runId,capability:$capability[0],sessionStatus:$status[0]}' \
+            '{ok:($result=="game-ready" or $result=="steam-login-required"),result:$result,runId:$runId,captureId:$captureId,screenshotBytes:$screenshotBytes,screenshotSha256:$screenshotSha256,capability:$capability[0],sessionStatus:$status[0]}' \
             > diagnostics/zero-gpu-wow64-live-test.json
           cat diagnostics/zero-gpu-wow64-live-test.json
           test "$RESULT" != failed
@@ -85,6 +104,14 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diagnostics/zero-gpu-wow64-live-test.json
-          git commit -m 'Record ZeroGPU portable WoW64 live test' || true
+          git commit -m 'Record interactive ZeroGPU WoW64 proof' || true
           git pull --rebase origin main
           git push
+      - name: Upload live screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zero-gpu-wow64-live
+          path: /tmp/proof/live.jpg
+          if-no-files-found: ignore
+          retention-days: 1
