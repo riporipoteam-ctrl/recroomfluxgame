@@ -1,0 +1,70 @@
+name: Audit Aug 2021 official Steam runtime branch
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/audit-2021-steam-runtime.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone Steam runtime branch
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 --branch recroom-2021-steam-runtime https://github.com/riporipoteam-ctrl/ripoteamserver.git server
+          git -C server rev-parse HEAD > /tmp/server-sha
+      - name: Compile and validate
+        id: audit
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            server/hf-space/recroom_autoload.py \
+            server/hf-space/recroom_2021_broker_alias.py \
+            server/hf-space/recroom_2021_steam_runtime.py \
+            server/hf-space/recroom_2021_steam_session.py
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('server/hf-space')
+          steam=(root/'recroom_2021_steam_runtime.py').read_text()
+          auto=(root/'recroom_autoload.py').read_text()
+          alias=(root/'recroom_2021_broker_alias.py').read_text()
+          assert 'https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe' in steam
+          assert '_STEAM_APP_ID = "471710"' in steam
+          assert 'steam-login-required' in steam
+          assert 'failed to initialize steam platform' in steam.lower()
+          assert 'recroom_2021_steam_runtime' in auto
+          assert 'expose_steam_phase' in auto
+          assert 'recroom-2021-08-25' in alias
+          assert 'recroom-2022-05-19' in alias
+          assert 'TestPlatformManager' not in steam
+          assert 'SteamAPI.Init' not in steam
+          print('OFFICIAL_STEAM_RUNTIME_AUDIT=true')
+          PY
+      - name: Persist audit
+        if: always()
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          {
+            echo "AUDIT_OUTCOME=$AUDIT_OUTCOME"
+            echo "SERVER_SHA=$(cat /tmp/server-sha 2>/dev/null || echo unavailable)"
+            echo "TARGET_BUILD=7225744"
+            echo "STEAM_MODE=official-windows-client"
+          } > diagnostics/aug25-2021-steam-runtime-audit.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/aug25-2021-steam-runtime-audit.txt
+          git commit -m 'Record Aug 2021 Steam runtime audit' || exit 0
+          git pull --rebase origin main
+          git push
+          test "$AUDIT_OUTCOME" = success
