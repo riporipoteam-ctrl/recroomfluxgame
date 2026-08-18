@@ -1,0 +1,68 @@
+name: Find latest 2022 build without Rec Room custom TLS verifier
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/find-prepin-custom-verifier.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Il2CppDumper once
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git dumper
+          dotnet build dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
+          find dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1 > /tmp/dumper-path
+      - name: Scan April 2022 candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics /tmp/prepin
+          : > diagnostics/prepin-custom-verifier-2022.txt
+          for row in \
+            '2022-04-28T06-50-43Z|8628560|7515621376213891010' \
+            '2022-04-21T06-50-40Z|8567561|3357294209222359997'; do
+            IFS='|' read -r date build manifest <<< "$row"
+            echo "=== $date build=$build manifest=$manifest ===" | tee -a diagnostics/prepin-custom-verifier-2022.txt
+            rm -rf /tmp/prepin/out && mkdir -p /tmp/prepin/out
+            base="https://archive.recagain.site/$date"
+            curl -fsSL --retry 3 --max-time 240 "$base/GameAssembly.dll" -o /tmp/prepin/out/GameAssembly.dll
+            curl -fsSL --retry 3 --max-time 120 "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o /tmp/prepin/out/global-metadata.dat
+            exe="$GITHUB_WORKSPACE/$(cat /tmp/dumper-path)"
+            set +e
+            (cd /tmp/prepin/out && DOTNET_ROLL_FORWARD=Major dotnet "$exe" GameAssembly.dll global-metadata.dat >/tmp/prepin/dumper.log 2>&1)
+            set -e
+            dump=$(find "$GITHUB_WORKSPACE/dumper" /tmp/prepin/out -name dump.cs -type f | sort -r | head -1)
+            if [ -z "$dump" ]; then echo 'DUMP_MISSING=true' | tee -a diagnostics/prepin-custom-verifier-2022.txt; continue; fi
+            python3 - "$dump" <<'PY' | tee -a diagnostics/prepin-custom-verifier-2022.txt
+          import sys,re
+          text=open(sys.argv[1],errors='replace').read()
+          classes=[]
+          for m in re.finditer(r'(?m)^public class ([^\r\n:{]+).*: ICertificateVerifyer\b.*$', text):
+              name=m.group(1).strip(); classes.append(name)
+          print('ICERTIFICATEVERIFYER_CLASS_COUNT='+str(len(classes)))
+          for c in classes: print('VERIFIER_CLASS='+c)
+          custom=[c for c in classes if 'AlwaysValidVerifyer' not in c]
+          print('CUSTOM_VERIFIER_COUNT='+str(len(custom)))
+          print('RESULT=' + ('CUSTOM_VERIFIER_PRESENT' if custom else 'NO_CUSTOM_VERIFIER_CLASS'))
+          PY
+          done
+          cat diagnostics/prepin-custom-verifier-2022.txt
+      - name: Commit result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/prepin-custom-verifier-2022.txt
+          git commit -m 'Record April 2022 custom verifier scan'
+          git push
