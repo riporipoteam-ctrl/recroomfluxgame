@@ -1,0 +1,69 @@
+name: Audit Aug 25 2021 RipoTeamServer branch
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/audit-ripoteam-aug25-2021-branch.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Clone exact server branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 --branch recroom-aug25-2021 https://github.com/riporipoteam-ctrl/ripoteamserver.git server
+      - name: Compile changed Python modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            server/hf-space/recroom_autoload.py \
+            server/hf-space/recroom_2021_gateway_config.py \
+            server/hf-space/recroom_2021_nameserver_contract.py \
+            server/hf-space/recroom_2021_archive_attestation.py \
+            server/hf-space/recroom_2021_metadata_locator.py \
+            server/hf-space/recroom_build_fingerprint.py \
+            server/hf-space/recroom_https_recnet_fix.py
+      - name: Validate 2021 target invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib
+          root=pathlib.Path('server')
+          fp=json.loads((root/'hf-space/recroom-may-2022-fingerprint.json').read_text())
+          assert fp['buildId']=='7225744', fp
+          assert fp['manifestId']=='7611535694620830622', fp
+          assert fp['buildDate']=='2021-08-25T06-50-15Z', fp
+          assert fp['trustedArchiveUrl']=='https://archive.recagain.site/download/2021-08-25T06-50-15Z', fp
+          assert fp['bootstrapFingerprintFromTrustedArchive'] is True, fp
+          autoload=(root/'hf-space/recroom_autoload.py').read_text()
+          assert '2021-08-25T06-50-15Z' in autoload
+          assert '20210827_prod' in autoload
+          transport=(root/'hf-space/recroom_https_recnet_fix.py').read_text()
+          assert 'public-https-bootstrap-public-https-services-aug25-2021-v2' in transport
+          assert 'recNetTlsVerificationBypassed' in transport and 'False' in transport
+          e2e=(root/'.github/workflows/recroom-native-live-launch.yml').read_text()
+          assert 'recroom-2021-08-25' in e2e
+          for path in [
+            root/'hf-space/recroom_autoload.py',
+            root/'hf-space/recroom_2021_gateway_config.py',
+            root/'hf-space/recroom_2021_nameserver_contract.py',
+            root/'hf-space/recroom_2021_archive_attestation.py',
+            root/'hf-space/recroom_2021_metadata_locator.py',
+            root/'hf-space/recroom-may-2022-fingerprint.json',
+            root/'hf-space/recroom_https_recnet_fix.py',
+            root/'.github/workflows/recroom-native-live-launch.yml',
+          ]:
+            text=path.read_text()
+            assert '2020-03-27' not in text, path
+            assert '2019-' not in text, path
+          print('AUG25_2021_BRANCH_AUDIT=true')
+          PY
