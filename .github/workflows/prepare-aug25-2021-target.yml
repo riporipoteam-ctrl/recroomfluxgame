@@ -1,0 +1,61 @@
+name: Prepare Aug 25 2021 Rec Room browser target
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/prepare-aug25-2021-target.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fingerprint exact Aug 25 2021 client and inspect bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          python3 - <<'PY' > diagnostics/aug25-2021-target.json
+          import urllib.request,hashlib,json
+          date='2021-08-25T06-50-15Z'; bid='7225744'; manifest='7611535694620830622'
+          paths={
+            'RecRoom.exe':'RecRoom.exe',
+            'Recroom_Release.exe':'Recroom_Release.exe',
+            'GameAssembly.dll':'GameAssembly.dll',
+            'UnityPlayer.dll':'UnityPlayer.dll',
+            'global-metadata.dat':'RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat',
+          }
+          out={'schema':1,'buildId':bid,'manifestId':manifest,'depotId':'471711','buildDate':date,'updateName':'the "Bento Box" edition A','fingerprintScope':'criticalFiles','criticalFiles':{}}
+          canonical=[]
+          base=f'https://archive.recagain.site/{date}'
+          for label,rel in paths.items():
+            try:b=urllib.request.urlopen(f'{base}/{rel}',timeout=240).read()
+            except Exception:
+              if label=='global-metadata.dat':
+                rel='Recroom_Release_Data/il2cpp_data/Metadata/global-metadata.dat'; b=urllib.request.urlopen(f'{base}/{rel}',timeout=240).read()
+              else: raise
+            h=hashlib.sha256(b).hexdigest(); n=len(b)
+            out['criticalFiles'][label]={'path':rel,'size':n,'sha256':h}
+            canonical.append(f'{rel}\0{n}\0{h}')
+            if label=='global-metadata.dat':
+              out['bootstrapOccurrences']=b.count(b'https://ns.rec.net/?v=2')
+          out['fileCount']=len(paths); out['totalBytes']=sum(v['size'] for v in out['criticalFiles'].values())
+          out['fingerprintSha256']=hashlib.sha256('\n'.join(canonical).encode()).hexdigest()
+          print(json.dumps(out,indent=2))
+          PY
+          cat diagnostics/aug25-2021-target.json
+      - name: Commit target fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/aug25-2021-target.json
+          git commit -m 'Record Aug 25 2021 Rec Room target fingerprint'
+          for n in 1 2 3 4 5; do git pull --rebase origin main && git push && exit 0; sleep 2; done
+          exit 1
