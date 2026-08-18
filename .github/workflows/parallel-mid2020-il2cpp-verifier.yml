@@ -1,0 +1,66 @@
+name: Locate 2020 IL2CPP RecNet verifier cutoff
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/parallel-mid2020-il2cpp-verifier.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - { date: '2020-10-08T07-02-49Z', id: '5645945', manifest: '1830464523229227740' }
+          - { date: '2020-09-01T07-13-47Z', id: '5474974', manifest: '1918475150128917362' }
+          - { date: '2020-08-04T08-00-43Z', id: '5358485', manifest: '1109057644854052159' }
+          - { date: '2020-07-01T07-10-54Z', id: '5221918', manifest: '819333407460269348' }
+          - { date: '2020-06-09T07-16-08Z', id: '5122966', manifest: '1545703745448283545' }
+          - { date: '2020-05-27T10-02-14Z', id: '5070286', manifest: '5708327461703404868' }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect verifier classes if IL2CPP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics /tmp/out
+          out='diagnostics/verifier-${{ matrix.build.id }}.txt'
+          printf 'DATE=${{ matrix.build.date }}\nBUILD=${{ matrix.build.id }}\nMANIFEST=${{ matrix.build.manifest }}\n' > "$out"
+          base='https://archive.recagain.site/${{ matrix.build.date }}'
+          if ! curl -fsSL --retry 2 --max-time 150 "$base/GameAssembly.dll" -o /tmp/out/GameAssembly.dll; then echo 'RESULT=NO_GAMEASSEMBLY_MONO_OR_MISSING' >> "$out"; cat "$out"; exit 0; fi
+          if ! curl -fsSL --retry 2 --max-time 100 "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o /tmp/out/global-metadata.dat; then echo 'RESULT=NO_METADATA' >> "$out"; cat "$out"; exit 0; fi
+          git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git /tmp/dumper
+          dotnet build /tmp/dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
+          exe=$(find /tmp/dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1)
+          set +e
+          (cd /tmp/out && DOTNET_ROLL_FORWARD=Major dotnet "$exe" GameAssembly.dll global-metadata.dat >/tmp/dumper.log 2>&1)
+          set -e
+          dump=$(find /tmp/dumper /tmp/out -name dump.cs -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+          test -n "$dump"
+          python3 - "$dump" <<'PY' >> "$out"
+          import sys,re
+          text=open(sys.argv[1],errors='replace').read()
+          classes=[m.group(1).strip() for m in re.finditer(r'(?m)^public class ([^\r\n:{]+).*: ICertificateVerifyer\b.*$',text)]
+          custom=[c for c in classes if 'AlwaysValidVerifyer' not in c]
+          print('ICERTIFICATEVERIFYER_CLASS_COUNT='+str(len(classes)))
+          for c in classes: print('VERIFIER_CLASS='+c)
+          print('CUSTOM_VERIFIER_COUNT='+str(len(custom)))
+          print('RESULT=' + ('CUSTOM_VERIFIER_PRESENT' if custom else 'NO_CUSTOM_VERIFIER_CLASS'))
+          PY
+          cat "$out"
+      - name: Persist result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'diagnostics/verifier-${{ matrix.build.id }}.txt'
+          git commit -m 'Record verifier scan for build ${{ matrix.build.id }}'
+          for n in 1 2 3 4 5; do git pull --rebase origin main && git push && exit 0; sleep 2; done
+          exit 1
