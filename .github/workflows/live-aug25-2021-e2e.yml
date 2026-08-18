@@ -12,40 +12,40 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 12
     env:
       SPACE_URL: https://echoxr-ripoteam-cloud-pc.hf.space
       FIREBASE_API_KEY: AIzaSyBV_ev8AVpKwgioPSSWiBYf8UU09bLbWOU
     steps:
       - uses: actions/checkout@v4
-      - name: Wait for exact 2021 runtime and run live game
+      - name: Launch exact Aug 25 2021 client through existing broker label
         id: test
         continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p diagnostics /tmp/rr2021
-          SESSION_ID=''; ACCESS_TOKEN=''; FIREBASE_TOKEN=''; PHASE='waiting-runtime'; RESULT='failure'; ERROR=''
+          SESSION_ID=''; ACCESS_TOKEN=''; FIREBASE_TOKEN=''; PHASE='capability'; RESULT='failure'; ERROR=''
           cleanup() {
             set +e
             if [ -n "$SESSION_ID" ] && [ -n "$ACCESS_TOKEN" ]; then
               curl -sS --max-time 20 -X POST "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/release?accessToken=$ACCESS_TOKEN" >/tmp/rr2021/release.json || true
             fi
             if [ -n "$FIREBASE_TOKEN" ]; then
-              curl -sS --max-time 20 -X POST "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$FIREBASE_API_KEY" \
-                -H 'content-type: application/json' --data "$(jq -cn --arg t "$FIREBASE_TOKEN" '{idToken:$t}')" >/tmp/rr2021/delete.json || true
+              curl -sS --max-time 20 -X POST "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$FIREBASE_API_KEY" -H 'content-type: application/json' --data "$(jq -cn --arg t "$FIREBASE_TOKEN" '{idToken:$t}')" >/tmp/rr2021/delete.json || true
             fi
-            python3 - <<PY
+            python3 - <<'PY'
           import json, pathlib, os
           def load(path):
               try: return json.loads(pathlib.Path(path).read_text())
               except Exception: return None
           out={
-            'result': os.environ.get('RESULT','failure'),
-            'phase': os.environ.get('PHASE','unknown'),
-            'error': os.environ.get('ERROR',''),
+            'result':os.environ.get('RESULT','failure'),
+            'phase':os.environ.get('PHASE','unknown'),
+            'error':os.environ.get('ERROR',''),
             'targetBuild':'7225744',
             'targetManifest':'7611535694620830622',
+            'brokerBuildId':'recroom-2022-05-19',
             'capability':load('/tmp/rr2021/capability.json'),
             'sessionCreate':load('/tmp/rr2021/create.json'),
             'sessionStatus':load('/tmp/rr2021/status.json'),
@@ -57,40 +57,18 @@ jobs:
           trap cleanup EXIT
           export RESULT PHASE ERROR
 
-          READY_RUNTIME=0
-          for i in $(seq 1 150); do
-            code=$(curl -sS --max-time 20 -H 'Cache-Control: no-cache' -o /tmp/rr2021/capability.json -w '%{http_code}' "$SPACE_URL/api/recroom-wine/capabilities?ts=$(date +%s)" || true)
-            build=$(jq -r '.targetBuild // empty' /tmp/rr2021/capability.json 2>/dev/null || true)
-            manifest=$(jq -r '.targetManifest // empty' /tmp/rr2021/capability.json 2>/dev/null || true)
-            exact=$(jq -r '.exactBuild // false' /tmp/rr2021/capability.json 2>/dev/null || true)
-            fp=$(jq -r '.checks.fingerprint // false' /tmp/rr2021/capability.json 2>/dev/null || true)
-            attested=$(jq -r '.clientFingerprint.attestedFromTrustedArchive // false' /tmp/rr2021/capability.json 2>/dev/null || true)
-            relay=$(jq -r '.recNetPublicServiceRelay // false' /tmp/rr2021/capability.json 2>/dev/null || true)
-            scheme=$(jq -r '.recNetLocalServiceScheme // empty' /tmp/rr2021/capability.json 2>/dev/null || true)
-            bypass=$(jq -r '.recNetTlsVerificationBypassed // false' /tmp/rr2021/capability.json 2>/dev/null || true)
-            echo "runtime[$i] http=$code build=$build manifest=$manifest exact=$exact fp=$fp attested=$attested relay=$relay scheme=$scheme bypass=$bypass"
-            if [ "$code" = 200 ] && [ "$build" = 7225744 ] && [ "$manifest" = 7611535694620830622 ] && [ "$exact" = true ] && [ "$fp" = true ] && [ "$attested" = true ] && [ "$relay" = true ] && [ "$scheme" = https ] && [ "$bypass" = false ]; then
-              READY_RUNTIME=1; break
-            fi
-            sleep 4
-          done
-          if [ "$READY_RUNTIME" != 1 ]; then ERROR='Exact attested Aug 25 2021 runtime never became ready'; export ERROR; exit 1; fi
+          curl -fsS --max-time 30 -H 'Cache-Control: no-cache' "$SPACE_URL/api/recroom-wine/capabilities?ts=$(date +%s)" -o /tmp/rr2021/capability.json
+          jq -e '.targetBuild == "7225744" and .targetManifest == "7611535694620830622" and .exactBuild == true and .checks.fingerprint == true and .clientFingerprint.attestedFromTrustedArchive == true and .recNetPublicServiceRelay == true and .recNetLocalServiceScheme == "https" and .recNetTlsVerificationBypassed == false' /tmp/rr2021/capability.json >/dev/null
 
           PHASE='firebase-auth'; export PHASE
           TEST_EMAIL="recroom-2021-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}@example.com"
           TEST_PASSWORD="Rr!$(openssl rand -hex 18)"
-          AUTH_CODE=$(curl -sS --max-time 30 -o /tmp/rr2021/auth.json -w '%{http_code}' \
-            -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" \
-            -H 'content-type: application/json' \
-            --data "$(jq -cn --arg email "$TEST_EMAIL" --arg password "$TEST_PASSWORD" '{email:$email,password:$password,returnSecureToken:true}')")
+          AUTH_CODE=$(curl -sS --max-time 30 -o /tmp/rr2021/auth.json -w '%{http_code}' -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" -H 'content-type: application/json' --data "$(jq -cn --arg email "$TEST_EMAIL" --arg password "$TEST_PASSWORD" '{email:$email,password:$password,returnSecureToken:true}')")
           test "$AUTH_CODE" = 200
           FIREBASE_TOKEN=$(jq -r '.idToken // empty' /tmp/rr2021/auth.json); test -n "$FIREBASE_TOKEN"
 
           PHASE='allocate'; export PHASE
-          CREATE_CODE=$(curl -sS --max-time 45 -o /tmp/rr2021/create.json -w '%{http_code}' \
-            -X POST "$SPACE_URL/api/recroom-public/sessions" \
-            -H "authorization: Bearer $FIREBASE_TOKEN" -H 'content-type: application/json' \
-            --data '{"buildId":"recroom-2021-08-25"}')
+          CREATE_CODE=$(curl -sS --max-time 45 -o /tmp/rr2021/create.json -w '%{http_code}' -X POST "$SPACE_URL/api/recroom-public/sessions" -H "authorization: Bearer $FIREBASE_TOKEN" -H 'content-type: application/json' --data '{"buildId":"recroom-2022-05-19"}')
           cat /tmp/rr2021/create.json
           test "$CREATE_CODE" = 202
           SESSION_ID=$(jq -r '.sessionId // empty' /tmp/rr2021/create.json)
@@ -99,7 +77,7 @@ jobs:
 
           PHASE='launch'; export PHASE
           READY=0
-          for i in $(seq 1 120); do
+          for i in $(seq 1 110); do
             curl -fsS --max-time 20 "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID?accessToken=$ACCESS_TOKEN" -o /tmp/rr2021/status.json
             state=$(jq -r '.state // empty' /tmp/rr2021/status.json); phase=$(jq -r '.phase // empty' /tmp/rr2021/status.json); progress=$(jq -r '.progress // 0' /tmp/rr2021/status.json)
             echo "launch[$i] state=$state phase=$phase progress=$progress"
@@ -112,8 +90,7 @@ jobs:
           jq -e '.streamUrl | type == "string" and startswith("https://")' /tmp/rr2021/status.json >/dev/null
 
           PHASE='capture'; export PHASE
-          CAP_CODE=$(curl -sS --max-time 30 -o /tmp/rr2021/capture-create.json -w '%{http_code}' \
-            -X POST "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures?accessToken=$ACCESS_TOKEN")
+          CAP_CODE=$(curl -sS --max-time 30 -o /tmp/rr2021/capture-create.json -w '%{http_code}' -X POST "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures?accessToken=$ACCESS_TOKEN")
           test "$CAP_CODE" = 202
           CAPTURE_ID=$(jq -r '.captureId // empty' /tmp/rr2021/capture-create.json); test -n "$CAPTURE_ID"
           CAPREADY=0
@@ -144,7 +121,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diagnostics/live-aug25-2021-e2e.json
-          git commit -m 'Record live Aug 25 2021 E2E result' || true
+          git commit -m 'Record Aug 25 2021 live launch through broker compatibility label' || true
           git pull --rebase origin main
           git push
       - name: Upload proof screenshot
