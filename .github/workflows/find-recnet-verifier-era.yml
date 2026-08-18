@@ -1,0 +1,70 @@
+name: Locate Rec Room custom TLS verifier introduction era
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/find-recnet-verifier-era.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Il2CppDumper once
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git /tmp/dumper
+          dotnet build /tmp/dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
+          find /tmp/dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1 > /tmp/dumper-path
+      - name: Sample verifier era
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics /tmp/era
+          : > diagnostics/recnet-custom-verifier-era.txt
+          for row in \
+            '2022-01-20T09-21-33Z|8043275|3008817658556881349' \
+            '2021-12-16T08-55-06Z|7865638|2249469937166260586' \
+            '2021-09-22T11-03-12Z|7381249|4495642363794043027' \
+            '2021-03-25T06-50-09Z|6398214|6587823609368733405' \
+            '2020-12-19T04-34-48Z|5990230|4784008965058944912'; do
+            IFS='|' read -r date build manifest <<< "$row"
+            echo "=== $date build=$build manifest=$manifest ===" | tee -a diagnostics/recnet-custom-verifier-era.txt
+            rm -rf /tmp/era/out && mkdir -p /tmp/era/out
+            base="https://archive.recagain.site/$date"
+            if ! curl -fsSL --retry 2 --max-time 180 "$base/GameAssembly.dll" -o /tmp/era/out/GameAssembly.dll; then echo 'NO_GAMEASSEMBLY=true' | tee -a diagnostics/recnet-custom-verifier-era.txt; continue; fi
+            if ! curl -fsSL --retry 2 --max-time 120 "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o /tmp/era/out/global-metadata.dat; then echo 'NO_METADATA=true' | tee -a diagnostics/recnet-custom-verifier-era.txt; continue; fi
+            exe="$(cat /tmp/dumper-path)"
+            set +e
+            (cd /tmp/era/out && DOTNET_ROLL_FORWARD=Major dotnet "$exe" GameAssembly.dll global-metadata.dat >/tmp/era/dumper.log 2>&1)
+            set -e
+            dump=$(find /tmp/dumper /tmp/era/out -name dump.cs -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+            if [ -z "$dump" ]; then echo 'DUMP_MISSING=true' | tee -a diagnostics/recnet-custom-verifier-era.txt; continue; fi
+            python3 - "$dump" <<'PY' | tee -a diagnostics/recnet-custom-verifier-era.txt
+          import sys,re
+          text=open(sys.argv[1],errors='replace').read()
+          classes=[m.group(1).strip() for m in re.finditer(r'(?m)^public class ([^\r\n:{]+).*: ICertificateVerifyer\b.*$',text)]
+          custom=[c for c in classes if 'AlwaysValidVerifyer' not in c]
+          print('ICERTIFICATEVERIFYER_CLASS_COUNT='+str(len(classes)))
+          for c in classes: print('VERIFIER_CLASS='+c)
+          print('CUSTOM_VERIFIER_COUNT='+str(len(custom)))
+          print('RESULT=' + ('CUSTOM_VERIFIER_PRESENT' if custom else 'NO_CUSTOM_VERIFIER_CLASS'))
+          PY
+          done
+          cat diagnostics/recnet-custom-verifier-era.txt
+      - name: Commit result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/recnet-custom-verifier-era.txt
+          git commit -m 'Record RecNet custom verifier era scan'
+          git pull --rebase origin main
+          git push
