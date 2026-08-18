@@ -1,6 +1,6 @@
 name: Audit Docker Space Wine32 and Steam bootstrap
 
-# Rerun marker: latest Docker branch + persisted logs
+# Rerun marker: final Docker branch + app startup smoke
 on:
   workflow_dispatch:
   push:
@@ -13,7 +13,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - name: Clone Docker Space branch
@@ -22,7 +22,7 @@ jobs:
           set -euo pipefail
           git clone -q --depth 1 --branch recroom-2021-wine32-docker https://github.com/riporipoteam-ctrl/ripoteamserver.git server
           git -C server rev-parse HEAD > /tmp/server-sha
-      - name: Build Docker Space image
+      - name: Build and smoke-test Docker Space image
         id: audit
         continue-on-error: true
         shell: bash
@@ -34,7 +34,6 @@ jobs:
             echo "ARCH=$(dpkg --print-architecture)"
             echo "FOREIGN=$(dpkg --print-foreign-architectures | tr "\n" " ")"
             dpkg-query -W wine wine64 wine32:i386
-            file /usr/lib/wine/wine || true
             Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX >/tmp/xvfb.log 2>&1 &
             XPID=$!
             trap "kill $XPID >/dev/null 2>&1 || true" EXIT
@@ -62,6 +61,28 @@ jobs:
             file "$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
             echo "OFFICIAL_STEAM_INSTALL_PRESENT=true"
           ' 2>&1 | tee /tmp/docker-run.log
+
+          CID=$(docker run -d -p 17860:7860 \
+            -e RECROOM_WINE_ENABLED=0 \
+            -e RIPO_DATA_DIR=/home/user/.ripo-cloud-pc \
+            ripo-space-wine32)
+          echo "$CID" > /tmp/app-cid
+          cleanup_app() { docker logs "$CID" > /tmp/docker-app.log 2>&1 || true; docker rm -f "$CID" >/dev/null 2>&1 || true; }
+          trap cleanup_app EXIT
+          APP_OK=0
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:17860/api/health > /tmp/app-health.json 2>/dev/null; then APP_OK=1; break; fi
+            if ! docker inspect -f '{{.State.Running}}' "$CID" 2>/dev/null | grep -qx true; then break; fi
+            sleep 1
+          done
+          docker logs "$CID" > /tmp/docker-app.log 2>&1 || true
+          test "$APP_OK" = 1
+          jq . /tmp/app-health.json || cat /tmp/app-health.json
+          grep -q 'Rec Room 2021 gateway/Wine identity loaded' /tmp/docker-app.log
+          grep -q 'Rec Room official Steam runtime loaded' /tmp/docker-app.log
+          echo "DOCKER_APP_HEALTH=true"
+          cleanup_app
+          trap - EXIT
       - name: Persist audit result
         if: always()
         shell: bash
@@ -78,10 +99,13 @@ jobs:
             echo "STEAM_INSTALLER=official"
             echo
             echo "===== DOCKER BUILD TAIL ====="
-            tail -n 100 /tmp/docker-build.log 2>/dev/null || true
+            tail -n 80 /tmp/docker-build.log 2>/dev/null || true
             echo
-            echo "===== DOCKER RUN TAIL ====="
-            tail -n 120 /tmp/docker-run.log 2>/dev/null || true
+            echo "===== DOCKER WINE/STEAM TAIL ====="
+            tail -n 100 /tmp/docker-run.log 2>/dev/null || true
+            echo
+            echo "===== DOCKER APP TAIL ====="
+            tail -n 140 /tmp/docker-app.log 2>/dev/null || true
           } > diagnostics/wine32-docker-space-audit.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
