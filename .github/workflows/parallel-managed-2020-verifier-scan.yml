@@ -1,0 +1,76 @@
+name: Parallel scan managed 2020 Rec Room TLS verifier
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/parallel-managed-2020-verifier-scan.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - { date: '2020-05-04T07-10-23Z', id: '4969267', manifest: '8711383531925002297' }
+          - { date: '2020-04-30T07-03-10Z', id: '4942098', manifest: '6856763107021842453' }
+          - { date: '2020-04-20T07-32-18Z', id: '4912996', manifest: '9119006898280485087' }
+          - { date: '2020-04-08T06-56-55Z', id: '4857256', manifest: '3706709507199582170' }
+          - { date: '2020-03-27T06-58-55Z', id: '4802887', manifest: '2539899194395389618' }
+          - { date: '2020-03-10T09-08-39Z', id: '4752558', manifest: '4766551521966830741' }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect managed custom certificate verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics /tmp/managed decompiled
+          base='https://archive.recagain.site/${{ matrix.build.date }}'
+          out='diagnostics/verifier-${{ matrix.build.id }}.txt'
+          printf 'DATE=${{ matrix.build.date }}\nBUILD=${{ matrix.build.id }}\nMANIFEST=${{ matrix.build.manifest }}\n' > "$out"
+          url="$base/RecRoom_Data/Managed/Assembly-CSharp.dll"
+          if ! curl -fsSL --retry 2 --max-time 120 "$url" -o /tmp/managed/Assembly-CSharp.dll; then
+            echo 'DIRECT_MANAGED_DOWNLOAD_FAILED=true' >> "$out"
+            cat "$out"
+            exit 0
+          fi
+          echo "ASSEMBLY_SIZE=$(stat -c%s /tmp/managed/Assembly-CSharp.dll)" >> "$out"
+          sha256sum /tmp/managed/Assembly-CSharp.dll | awk '{print "ASSEMBLY_SHA256="$1}' >> "$out"
+          dotnet tool install --global ilspycmd >/dev/null 2>&1 || dotnet tool update --global ilspycmd >/dev/null 2>&1 || true
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          rm -rf decompiled && mkdir decompiled
+          ilspycmd -p -o decompiled /tmp/managed/Assembly-CSharp.dll >/tmp/ilspy.out 2>/tmp/ilspy.err || true
+          python3 - <<'PY' >> "$out"
+          from pathlib import Path
+          import re
+          hits=[]; pinish=[]
+          for p in Path('decompiled').rglob('*.cs'):
+              try:t=p.read_text(errors='replace')
+              except:continue
+              if re.search(r'ICertificateVerifyer|CertificateVerifyer|CustomCertificateVerifyer',t,re.I):
+                  hits.append(str(p))
+                  if re.search(r'GetPublicKey|SHA.?256|public.?key|certificate',t,re.I): pinish.append(str(p))
+          print('VERIFIER_SOURCE_FILE_COUNT='+str(len(hits)))
+          for h in hits[:20]: print('VERIFIER_FILE='+h)
+          print('PINNING_CANDIDATE_FILE_COUNT='+str(len(pinish)))
+          for h in pinish[:20]: print('PINNING_FILE='+h)
+          print('RESULT=' + ('CUSTOM_VERIFIER_SOURCE_PRESENT' if hits else 'NO_CUSTOM_VERIFIER_SOURCE_FOUND'))
+          PY
+          echo 'STRING_ICERT_COUNT='$(strings -a /tmp/managed/Assembly-CSharp.dll | grep -c -E 'ICertificateVerifyer|CertificateVerifyer' || true) >> "$out"
+          echo 'STRING_NS_REC_NET='$(strings -a /tmp/managed/Assembly-CSharp.dll | grep -c -F 'ns.rec.net' || true) >> "$out"
+          cat "$out"
+      - name: Persist result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'diagnostics/verifier-${{ matrix.build.id }}.txt'
+          git commit -m 'Record verifier scan for build ${{ matrix.build.id }}'
+          for n in 1 2 3 4 5; do git pull --rebase origin main && git push && exit 0; sleep 2; done
+          exit 1
