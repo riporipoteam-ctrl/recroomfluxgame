@@ -7,37 +7,44 @@ on:
     paths: ['.github/workflows/probe-live-may12-capability.yml']
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   probe:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Poll exact May 12 client and trusted transport
+      - uses: actions/checkout@v4
+      - name: Capture live May 12 capability and failure diagnostics
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p diagnostics
           URL='https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/capabilities'
-          for i in $(seq 1 130); do
-            code=$(curl -sS --max-time 15 -o /tmp/cap.json -w '%{http_code}' "$URL" || true)
-            build=$(jq -r '.targetBuild // empty' /tmp/cap.json 2>/dev/null || true)
-            manifest=$(jq -r '.targetManifest // empty' /tmp/cap.json 2>/dev/null || true)
-            transport=$(jq -r '.recNetTransport // empty' /tmp/cap.json 2>/dev/null || true)
-            exact=$(jq -r '.exactBuild // false' /tmp/cap.json 2>/dev/null || true)
-            fp=$(jq -r '.checks.fingerprint // false' /tmp/cap.json 2>/dev/null || true)
-            public=$(jq -r '.recNetPublicBootstrap // false' /tmp/cap.json 2>/dev/null || true)
-            bypass=$(jq -r '.recNetTlsVerificationBypassed // false' /tmp/cap.json 2>/dev/null || true)
-            reason=$(jq -r '.reason // empty' /tmp/cap.json 2>/dev/null || true)
-            echo "probe[$i] http=$code build=$build manifest=$manifest transport=$transport exact=$exact fingerprint=$fp public=$public bypass=$bypass reason=$reason"
-            if [ "$code" = 200 ] && [ "$build" = '8715820' ] && [ "$manifest" = '2586133705164702202' ] && [ "$transport" = 'trusted-public-https-bootstrap-local-http-may12-v1' ] && [ "$exact" = true ] && [ "$fp" = true ] && [ "$public" = true ] && [ "$bypass" = false ]; then
-              jq . /tmp/cap.json
-              echo 'MAY12_TRUSTED_TRANSPORT_LIVE=true'
-              exit 0
-            fi
-            sleep 4
-          done
-          echo '===== LAST CAPABILITY ====='
-          cat /tmp/cap.json || true
-          echo '::error::Trusted May 12 transport did not become ready.'
-          exit 1
+          code=$(curl -sS --max-time 30 -H 'Cache-Control: no-cache' -o diagnostics/live-may12-capability.json -w '%{http_code}' "$URL?ts=$(date +%s)" || true)
+          echo "HTTP=$code"
+          test "$code" = 200
+          python3 -m json.tool diagnostics/live-may12-capability.json > /tmp/pretty.json
+          mv /tmp/pretty.json diagnostics/live-may12-capability.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('diagnostics/live-may12-capability.json'))
+          print(json.dumps({
+            'exactBuild':p.get('exactBuild'),
+            'targetBuild':p.get('targetBuild'),
+            'targetManifest':p.get('targetManifest'),
+            'transport':p.get('recNetTransport'),
+            'redirectPatch':p.get('recNetRedirectPatch'),
+            'lastGraphicsFailure':p.get('lastGraphicsFailure'),
+          }, indent=2))
+          PY
+      - name: Commit diagnostic snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/live-may12-capability.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Record live May 12 Rec Room failure diagnostics'
+          git push
