@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "buildId": "4802887",
+  "manifestId": "2539899194395389618",
+  "depotId": "471711",
+  "buildDate": "2020-03-27T06-58-55Z",
+  "fingerprintScope": "criticalFiles",
+  "criticalFiles": {
+    "RecRoom.exe": {
+      "path": "RecRoom.exe",
+      "missing": true
+    },
+    "Recroom_Release.exe": {
+      "path": "Recroom_Release.exe",
+      "missing": true
+    },
+    "GameAssembly.dll": {
+      "path": "GameAssembly.dll",
+      "missing": true
+    },
+    "UnityPlayer.dll": {
+      "path": "UnityPlayer.dll",
+      "missing": true
+    },
+    "global-metadata.dat": {
+      "path": "RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat",
+      "missing": true
+    }
+  },
+  "fileCount": 0,
+  "totalBytes": 0,
+  "fingerprintSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
