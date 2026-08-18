@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
-      - name: Capture live capability after 2021 deployment
+      - name: Capture live capability during Aug 2021 E2E
         shell: bash
         run: |
           set -euo pipefail
@@ -29,17 +29,11 @@ jobs:
           import json
           p=json.load(open('diagnostics/live-aug25-2021-capability.json'))
           print(json.dumps({
-            'targetBuild':p.get('targetBuild'),
-            'targetManifest':p.get('targetManifest'),
-            'targetFingerprint':p.get('targetFingerprint'),
-            'exactBuild':p.get('exactBuild'),
-            'checks':p.get('checks'),
-            'clientFingerprint':p.get('clientFingerprint'),
-            'readyForGame':p.get('readyForGame'),
-            'reason':p.get('reason'),
-            'recNetTransport':p.get('recNetTransport'),
-            'recNetPublicBootstrap':p.get('recNetPublicBootstrap'),
-            'recNetLocalServiceScheme':p.get('recNetLocalServiceScheme'),
+            'targetBuild':p.get('targetBuild'), 'targetManifest':p.get('targetManifest'),
+            'targetFingerprint':p.get('targetFingerprint'), 'exactBuild':p.get('exactBuild'),
+            'runningSandboxes':p.get('runningSandboxes'), 'readyForGame':p.get('readyForGame'),
+            'checks':p.get('checks'), 'clientFingerprint':p.get('clientFingerprint'),
+            'recNetTransport':p.get('recNetTransport'), 'recNetLocalServiceScheme':p.get('recNetLocalServiceScheme'),
             'recNetPublicServiceRelay':p.get('recNetPublicServiceRelay'),
             'recNetTlsVerificationBypassed':p.get('recNetTlsVerificationBypassed'),
             'lastGraphicsFailure':p.get('lastGraphicsFailure'),
@@ -53,6 +47,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diagnostics/live-aug25-2021-capability.json
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Record live Aug 25 2021 post-deploy capability'
+          git commit -m 'Record live Aug 2021 sandbox snapshot'
           git pull --rebase origin main
           git push
