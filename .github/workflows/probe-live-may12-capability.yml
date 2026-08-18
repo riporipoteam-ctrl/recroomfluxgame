@@ -15,22 +15,41 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Capture live production capability
+      - name: Wait for March 27 production runtime
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p diagnostics
           URL='https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/capabilities'
-          code=$(curl -sS --max-time 30 -H 'Cache-Control: no-cache' -o diagnostics/live-production-capability.json -w '%{http_code}' "$URL?ts=$(date +%s)" || true)
-          echo "HTTP=$code"
-          test "$code" = 200
+          matched=0
+          for n in $(seq 1 36); do
+            code=$(curl -sS --max-time 20 -H 'Cache-Control: no-cache' -o /tmp/cap.json -w '%{http_code}' "$URL?ts=$(date +%s)-$n" || true)
+            if [ "$code" = 200 ]; then
+              build=$(python3 -c "import json;print(json.load(open('/tmp/cap.json')).get('targetBuild',''))" 2>/dev/null || true)
+              transport=$(python3 -c "import json;print(json.load(open('/tmp/cap.json')).get('recNetTransport',''))" 2>/dev/null || true)
+              exact=$(python3 -c "import json;print(str(json.load(open('/tmp/cap.json')).get('exactBuild',False)).lower())" 2>/dev/null || true)
+              echo "attempt=$n build=$build transport=$transport exact=$exact"
+              cp /tmp/cap.json diagnostics/live-production-capability.json
+              if [ "$build" = '4802887' ] && [ "$transport" = 'trusted-public-https-bootstrap-local-http-mar27-v1' ]; then
+                matched=1
+                break
+              fi
+            else
+              echo "attempt=$n HTTP=$code"
+            fi
+            sleep 10
+          done
           python3 -m json.tool diagnostics/live-production-capability.json > /tmp/pretty.json
           mv /tmp/pretty.json diagnostics/live-production-capability.json
+          echo "MAR27_RUNTIME_MATCH=$matched"
           cat diagnostics/live-production-capability.json
+          test "$matched" = 1
       - name: Commit diagnostic snapshot
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
+          test -f diagnostics/live-production-capability.json || exit 0
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diagnostics/live-production-capability.json
