@@ -1,0 +1,11 @@
+BUILD_ID=4504243
+MANIFEST=5948698735243937255
+MISSING=RecRoom.exe HTTP=404
+FILE=Recroom_Release.exe SIZE=833920 SHA256=c4e547f0e0c0f2cbeb4c0f441f4283f3d692bb48500e5fa7aa6bfde08a3f086e
+FILE=UnityPlayer.dll SIZE=22945224 SHA256=3908df9807bf427815a0895840982f86f4258dece5bebba939887517b1ae80ed
+FILE=GameAssembly.dll SIZE=60334592 SHA256=bed2abfdc5d0c87f0d591bc173ef5a399231162b3e593a3c21c1ad3954a27c21
+MISSING=RecRoom_Data/Managed/Assembly-CSharp.dll HTTP=404
+MISSING=Recroom_Release_Data/Managed/Assembly-CSharp.dll HTTP=404
+MISSING=RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat HTTP=404
+FILE=Recroom_Release_Data/il2cpp_data/Metadata/global-metadata.dat SIZE=20536924 SHA256=0f92001e61a22a6bae76162e38ea801936b346c2fd9bcd1995a1428e49604884
+MANAGED_ASSEMBLY=false
