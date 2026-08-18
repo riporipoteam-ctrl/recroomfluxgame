@@ -18,7 +18,7 @@ jobs:
       FIREBASE_API_KEY: AIzaSyBV_ev8AVpKwgioPSSWiBYf8UU09bLbWOU
     steps:
       - uses: actions/checkout@v4
-      - name: Launch and diagnose post-update Steam stream
+      - name: Launch and diagnose active ZeroGPU WoW64 stream
         shell: bash
         run: |
           set -euo pipefail
@@ -62,8 +62,17 @@ jobs:
             sleep 3
           done
 
+          # Act like the live Flux StreamPlayer: keep requesting the stream root
+          # while Steam is updating/signing in. Each request must refresh the
+          # runtime host heartbeat on the patched server.
           if [ "$RESULT" = steam-login-required ]; then
-            sleep 70
+            STREAM_URL=$(jq -r '.streamUrl // empty' /tmp/proof/status.json)
+            test -n "$STREAM_URL"
+            for i in $(seq 1 8); do
+              echo "stream-heartbeat[$i]"
+              curl -sS --max-time 8 -o /dev/null "$STREAM_URL" || true
+              sleep 10
+            done
             curl -fsS --max-time 20 "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID?accessToken=$ACCESS_TOKEN" -o /tmp/proof/status.json
           fi
 
@@ -106,6 +115,7 @@ jobs:
           cat diagnostics/zero-gpu-wow64-live-test.json
           test "$RESULT" != failed
           test "$RESULT" != timeout
+          test "$CAPTURE_HTTP" = 202
       - name: Commit live result
         if: always()
         shell: bash
@@ -115,7 +125,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diagnostics/zero-gpu-wow64-live-test.json
-          git commit -m 'Record post-update capture diagnostics' || true
+          git commit -m 'Record active-stream heartbeat proof' || true
           git pull --rebase origin main
           git push
       - name: Upload live screenshot
