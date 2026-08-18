@@ -32,7 +32,15 @@ jobs:
           printf 'DATE=${{ matrix.build.date }}\nBUILD=${{ matrix.build.id }}\nMANIFEST=${{ matrix.build.manifest }}\n' > "$out"
           base='https://archive.recagain.site/${{ matrix.build.date }}'
           if ! curl -fsSL --retry 2 --max-time 150 "$base/GameAssembly.dll" -o /tmp/out/GameAssembly.dll; then echo 'RESULT=NO_GAMEASSEMBLY_MONO_OR_MISSING' >> "$out"; cat "$out"; exit 0; fi
-          if ! curl -fsSL --retry 2 --max-time 100 "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o /tmp/out/global-metadata.dat; then echo 'RESULT=NO_METADATA' >> "$out"; cat "$out"; exit 0; fi
+          metadata=''
+          for rel in \
+            'RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat' \
+            'Recroom_Release_Data/il2cpp_data/Metadata/global-metadata.dat' \
+            'RecRoom_Release_Data/il2cpp_data/Metadata/global-metadata.dat'; do
+            if curl -fsSL --retry 1 --max-time 100 "$base/$rel" -o /tmp/out/global-metadata.dat; then metadata="$rel"; break; fi
+          done
+          if [ -z "$metadata" ]; then echo 'RESULT=NO_METADATA' >> "$out"; cat "$out"; exit 0; fi
+          echo "METADATA_PATH=$metadata" >> "$out"
           git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git /tmp/dumper
           dotnet build /tmp/dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
           exe=$(find /tmp/dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1)
