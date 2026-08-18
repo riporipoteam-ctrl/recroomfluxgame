@@ -1,4 +1,4 @@
-name: Audit Aug 25 2021 RipoTeamServer branch
+name: Audit final Aug 25 2021 RipoTeamServer branch
 
 on:
   workflow_dispatch:
@@ -15,13 +15,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Clone exact server branch
+      - name: Clone exact final server branch
         shell: bash
         run: |
           set -euo pipefail
-          git clone -q --depth 1 --branch recroom-aug25-2021 https://github.com/riporipoteam-ctrl/ripoteamserver.git server
+          git clone -q --depth 1 --branch recroom-aug25-2021-final https://github.com/riporipoteam-ctrl/ripoteamserver.git server
           git -C server rev-parse HEAD > /tmp/server-sha
-      - name: Compile and validate Aug 2021 branch
+      - name: Compile and validate Aug 2021 final branch
         id: audit
         continue-on-error: true
         shell: bash
@@ -67,7 +67,7 @@ jobs:
             text=path.read_text()
             assert '2020-03-27' not in text, path
             assert '2019-' not in text, path
-          print('AUG25_2021_BRANCH_AUDIT=true')
+          print('AUG25_2021_FINAL_BRANCH_AUDIT=true')
           PY
       - name: Persist audit result
         if: always()
@@ -82,11 +82,12 @@ jobs:
             echo "SERVER_SHA=$(cat /tmp/server-sha 2>/dev/null || echo unavailable)"
             echo "TARGET_BUILD=7225744"
             echo "TARGET_MANIFEST=7611535694620830622"
+            echo "BRANCH=recroom-aug25-2021-final"
           } > diagnostics/aug25-2021-branch-audit.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diagnostics/aug25-2021-branch-audit.txt
-          git commit -m 'Record Aug 25 2021 branch audit result' || exit 0
+          git commit -m 'Record final Aug 25 2021 branch audit result' || exit 0
           git pull --rebase origin main
           git push
           test "$AUDIT_OUTCOME" = success
