@@ -1,0 +1,75 @@
+name: Find 2022 RecNet custom verifier cutoff
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/find-2022-prepin-cutoff.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Il2CppDumper once
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 https://github.com/Perfare/Il2CppDumper.git /tmp/dumper
+          dotnet build /tmp/dumper/Il2CppDumper/Il2CppDumper.csproj -c Release >/dev/null
+          find /tmp/dumper/Il2CppDumper/bin/Release -type f -name 'Il2CppDumper.dll' | head -1 > /tmp/dumper-path
+      - name: Scan candidates newest first
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics /tmp/cutoff
+          : > diagnostics/recnet-custom-verifier-cutoff-2022.txt
+          for row in \
+            '2022-04-15T06-50-51Z|8538723|5074805288827523797' \
+            '2022-04-08T06-52-23Z|8504784|3300297416944352195' \
+            '2022-03-30T06-50-13Z|8442185|4860694567153974568' \
+            '2022-03-23T06-55-51Z|8400677|6498111350645449747' \
+            '2022-03-16T06-50-34Z|8357630|461647593765554581' \
+            '2022-03-09T08-50-14Z|8318552|3630672705004706929' \
+            '2022-03-02T08-50-56Z|8277540|3923980740911990021' \
+            '2022-02-25T08-54-49Z|8263800|2800208212683326113'; do
+            IFS='|' read -r date build manifest <<< "$row"
+            echo "=== $date build=$build manifest=$manifest ===" | tee -a diagnostics/recnet-custom-verifier-cutoff-2022.txt
+            rm -rf /tmp/cutoff/out && mkdir -p /tmp/cutoff/out
+            base="https://archive.recagain.site/$date"
+            if ! curl -fsSL --retry 2 --max-time 180 "$base/GameAssembly.dll" -o /tmp/cutoff/out/GameAssembly.dll; then echo 'DOWNLOAD_GAMEASSEMBLY_FAILED=true' | tee -a diagnostics/recnet-custom-verifier-cutoff-2022.txt; continue; fi
+            if ! curl -fsSL --retry 2 --max-time 120 "$base/RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat" -o /tmp/cutoff/out/global-metadata.dat; then echo 'DOWNLOAD_METADATA_FAILED=true' | tee -a diagnostics/recnet-custom-verifier-cutoff-2022.txt; continue; fi
+            exe="$(cat /tmp/dumper-path)"
+            set +e
+            (cd /tmp/cutoff/out && DOTNET_ROLL_FORWARD=Major dotnet "$exe" GameAssembly.dll global-metadata.dat >/tmp/cutoff/dumper.log 2>&1)
+            set -e
+            dump=$(find /tmp/dumper /tmp/cutoff/out -name dump.cs -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+            if [ -z "$dump" ]; then echo 'DUMP_MISSING=true' | tee -a diagnostics/recnet-custom-verifier-cutoff-2022.txt; continue; fi
+            python3 - "$dump" <<'PY' | tee -a diagnostics/recnet-custom-verifier-cutoff-2022.txt
+          import sys,re
+          text=open(sys.argv[1],errors='replace').read()
+          classes=[]
+          for m in re.finditer(r'(?m)^public class ([^\r\n:{]+).*: ICertificateVerifyer\b.*$', text):
+              classes.append(m.group(1).strip())
+          custom=[c for c in classes if 'AlwaysValidVerifyer' not in c]
+          print('ICERTIFICATEVERIFYER_CLASS_COUNT='+str(len(classes)))
+          for c in classes: print('VERIFIER_CLASS='+c)
+          print('CUSTOM_VERIFIER_COUNT='+str(len(custom)))
+          print('RESULT=' + ('CUSTOM_VERIFIER_PRESENT' if custom else 'NO_CUSTOM_VERIFIER_CLASS'))
+          PY
+          done
+          cat diagnostics/recnet-custom-verifier-cutoff-2022.txt
+      - name: Commit result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/recnet-custom-verifier-cutoff-2022.txt
+          git commit -m 'Record early 2022 RecNet verifier cutoff scan'
+          git pull --rebase origin main
+          git push
