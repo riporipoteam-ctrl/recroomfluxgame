@@ -1,6 +1,6 @@
 name: Capture Aug 25 2021 Rec Room proof
 
-# Rerun marker: canonical 2021 production playability test 2026-08-18
+# Rerun marker: ZeroGPU portable WoW64 live playability test 2026-08-18T16:15+02:00
 on:
   workflow_dispatch:
   push:
