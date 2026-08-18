@@ -1,0 +1,85 @@
+name: Audit Docker Space Wine32 and Steam bootstrap
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/audit-wine32-docker-space.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone Docker Space branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 --branch recroom-2021-wine32-docker https://github.com/riporipoteam-ctrl/ripoteamserver.git server
+          git -C server rev-parse HEAD > /tmp/server-sha
+      - name: Build Docker Space image
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --pull -t ripo-space-wine32 server/hf-space
+          docker run --rm ripo-space-wine32 bash -lc '
+            set -euo pipefail
+            echo "ARCH=$(dpkg --print-architecture)"
+            echo "FOREIGN=$(dpkg --print-foreign-architectures | tr "\n" " ")"
+            dpkg-query -W wine wine64 wine32:i386
+            file /usr/lib/wine/wine || true
+            Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX >/tmp/xvfb.log 2>&1 &
+            XPID=$!
+            trap "kill $XPID >/dev/null 2>&1 || true" EXIT
+            sleep 2
+            export DISPLAY=:99
+            export WINEPREFIX=/home/user/test-wow64-prefix
+            export WINEARCH=win64
+            export WINEDEBUG=-all
+            wineboot -u
+            wineserver -w || true
+            test -f "$WINEPREFIX/drive_c/windows/system32/ntdll.dll"
+            test -f "$WINEPREFIX/drive_c/windows/syswow64/ntdll.dll"
+            echo "WOW64_NTDLL_PRESENT=true"
+            curl -fL --retry 2 --max-time 90 https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe -o /tmp/SteamSetup.exe
+            test "$(stat -c %s /tmp/SteamSetup.exe)" -gt 1000000
+            test "$(head -c2 /tmp/SteamSetup.exe)" = MZ
+            timeout 150 wine /tmp/SteamSetup.exe /S || rc=$?
+            rc=${rc:-0}
+            echo "STEAM_SETUP_EXIT=$rc"
+            for i in $(seq 1 60); do
+              if [ -f "$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe" ]; then break; fi
+              sleep 1
+            done
+            test -f "$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
+            file "$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
+            echo "OFFICIAL_STEAM_INSTALL_PRESENT=true"
+          '
+      - name: Persist audit result
+        if: always()
+        shell: bash
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          {
+            echo "AUDIT_OUTCOME=$AUDIT_OUTCOME"
+            echo "SERVER_SHA=$(cat /tmp/server-sha 2>/dev/null || echo unavailable)"
+            echo "TARGET_BUILD=7225744"
+            echo "WINE32=i386"
+            echo "STEAM_INSTALLER=official"
+          } > diagnostics/wine32-docker-space-audit.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/wine32-docker-space-audit.txt
+          git commit -m 'Record Docker Wine32 Steam bootstrap audit' || exit 0
+          git pull --rebase origin main
+          git push
+          test "$AUDIT_OUTCOME" = success
