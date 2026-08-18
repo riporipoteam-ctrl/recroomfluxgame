@@ -1,0 +1,4 @@
+AUDIT_OUTCOME=success
+SERVER_SHA=dd04605dbbe0852f4de41e0c17a81c7de5c7d386
+TARGET_BUILD=7225744
+STEAM_MODE=official-windows-client
