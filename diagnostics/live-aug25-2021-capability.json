@@ -1,8 +1,8 @@
 {
     "ok": true,
     "provider": "wine",
-    "supported": false,
-    "readyForGame": false,
+    "supported": true,
+    "readyForGame": true,
     "checks": {
         "wine": true,
         "wineboot": true,
@@ -12,12 +12,12 @@
         "pulse": true,
         "python": true,
         "streamWorker": true,
-        "client": false,
-        "manifest": false,
-        "fingerprint": false
+        "client": true,
+        "manifest": true,
+        "fingerprint": true
     },
-    "reason": "server Rec Room client is not installed at /home/user/.ripo-cloud-pc/recroom-client-2022",
-    "warning": "Players never install anything; the server needs one legally obtained May 19 2022 client image before it can launch Rec Room.",
+    "reason": null,
+    "warning": null,
     "runningVms": 0,
     "runningSandboxes": 0,
     "maxVms": 2,
@@ -65,17 +65,15 @@
     "recNetLoopbackTls": false,
     "failureDiagnosticsPatch": "graphics-failure-diagnostics-v2-tls-uri",
     "lastGraphicsFailure": null,
-    "exactBuild": false,
-    "targetFingerprint": "",
+    "exactBuild": true,
+    "targetFingerprint": "bb05d618fa989ccd4bd446b45f76f3786353cc00656d0d8d3060216c9910d46f",
     "clientFingerprint": {
-        "ok": false,
+        "ok": true,
         "buildId": "7225744",
         "manifestId": "7611535694620830622",
-        "fingerprintSha256": "",
-        "attestedFromTrustedArchive": false,
-        "manifestPresent": false,
-        "mismatches": [
-            "client directory is missing"
-        ]
+        "fingerprintSha256": "bb05d618fa989ccd4bd446b45f76f3786353cc00656d0d8d3060216c9910d46f",
+        "attestedFromTrustedArchive": true,
+        "manifestPresent": true,
+        "mismatches": []
     }
 }
