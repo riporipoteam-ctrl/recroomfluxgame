@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "verifiedAt": "2026-08-18T15:06:24Z",
+  "workflowRunId": "32151611304",
+  "target": {
+    "buildId": "7225744",
+    "manifestId": "7611535694620830622",
+    "fluxBuildId": "recroom-2021-08-25",
+    "fingerprintSha256": "bb05d618fa989ccd4bd446b45f76f3786353cc00656d0d8d3060216c9910d46f"
+  },
+  "runtime": {
+    "provider": "ripoteam-wine",
+    "freeHuggingFaceZeroGPU": true,
+    "portableWine": "wine-11.13-amd64-wow64",
+    "steamClient": "official",
+    "phase": "steam-login-required",
+    "interactiveStream": true,
+    "gameReady": false
+  },
+  "heartbeatProof": {
+    "streamRequests": 8,
+    "intervalSeconds": 10,
+    "hostStayedOnline": true,
+    "captureHttp": 202
+  },
+  "screenshot": {
+    "bytes": 26544,
+    "sha256": "125bbd95d42afb61e281d0153292f34a9da3ce44a41db64e67736ccfbdea9a8e",
+    "visualVerification": "Official Steam sign-in UI rendered after updater completed; username/password fields and Steam QR sign-in were visible."
+  },
+  "security": {
+    "tlsVerificationBypassed": false,
+    "steamAuthenticationBypassed": false,
+    "credentialsStoredInProof": false
+  },
+  "remainingGate": "A real player must complete Steam authentication inside their own Flux stream before post-auth Rec Room gameplay can be verified."
+}
