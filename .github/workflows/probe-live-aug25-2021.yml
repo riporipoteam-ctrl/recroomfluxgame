@@ -1,5 +1,6 @@
 name: Probe live Aug 25 2021 RipoTeam capability
 
+# Probe marker: raw Steam bootstrap failure
 on:
   workflow_dispatch:
   push:
@@ -15,7 +16,7 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
-      - name: Capture live capability during Aug 2021 E2E
+      - name: Capture live capability after Steam bootstrap failure
         shell: bash
         run: |
           set -euo pipefail
@@ -47,6 +48,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diagnostics/live-aug25-2021-capability.json
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Record live Aug 2021 sandbox snapshot'
+          git commit -m 'Record raw Aug 2021 Steam bootstrap failure'
           git pull --rebase origin main
           git push
