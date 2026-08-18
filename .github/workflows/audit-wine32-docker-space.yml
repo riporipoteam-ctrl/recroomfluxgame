@@ -1,6 +1,6 @@
 name: Audit Docker Space Wine32 and Steam bootstrap
 
-# Rerun marker: final Docker branch + app startup smoke
+# Rerun marker: spaces compatibility fix + final app startup smoke
 on:
   workflow_dispatch:
   push:
