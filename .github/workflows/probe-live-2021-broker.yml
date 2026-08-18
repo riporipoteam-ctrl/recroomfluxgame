@@ -1,0 +1,37 @@
+name: Probe deployed Aug 2021 broker target
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/probe-live-2021-broker.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read public broker status
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          curl -fsS --max-time 30 -H 'Cache-Control: no-cache' \
+            "https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-public/status?ts=$(date +%s)" \
+            -o diagnostics/live-2021-broker-status.json
+          jq . diagnostics/live-2021-broker-status.json
+          jq -e '.targetBuild == "recroom-2021-08-25" and .configured == true and .vmReadyForGame == true' diagnostics/live-2021-broker-status.json >/dev/null
+      - name: Commit broker snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/live-2021-broker-status.json
+          git commit -m 'Record deployed Aug 2021 broker status' || exit 0
+          git pull --rebase origin main
+          git push
