@@ -1,0 +1,106 @@
+name: Capture Aug 25 2021 Rec Room proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/capture-aug25-2021-proof.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SPACE_URL: https://echoxr-ripoteam-cloud-pc.hf.space
+      FIREBASE_API_KEY: AIzaSyBV_ev8AVpKwgioPSSWiBYf8UU09bLbWOU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Launch and capture exact Aug 2021 client
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics /tmp/proof
+          SESSION_ID=''; ACCESS_TOKEN=''; FIREBASE_TOKEN=''
+          cleanup() {
+            set +e
+            if [ -n "$SESSION_ID" ] && [ -n "$ACCESS_TOKEN" ]; then
+              curl -sS --max-time 20 -X POST "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/release?accessToken=$ACCESS_TOKEN" >/dev/null || true
+            fi
+            if [ -n "$FIREBASE_TOKEN" ]; then
+              curl -sS --max-time 20 -X POST "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$FIREBASE_API_KEY" -H 'content-type: application/json' --data "$(jq -cn --arg t "$FIREBASE_TOKEN" '{idToken:$t}')" >/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          curl -fsS --max-time 30 -H 'Cache-Control: no-cache' "$SPACE_URL/api/recroom-wine/capabilities?ts=$(date +%s)" -o /tmp/proof/capability.json
+          jq -e '.targetBuild == "7225744" and .targetManifest == "7611535694620830622" and .exactBuild == true and .clientFingerprint.attestedFromTrustedArchive == true' /tmp/proof/capability.json >/dev/null
+
+          TEST_EMAIL="recroom-proof-${GITHUB_RUN_ID}@example.com"
+          TEST_PASSWORD="Rr!$(openssl rand -hex 18)"
+          code=$(curl -sS --max-time 30 -o /tmp/proof/auth.json -w '%{http_code}' -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" -H 'content-type: application/json' --data "$(jq -cn --arg email "$TEST_EMAIL" --arg password "$TEST_PASSWORD" '{email:$email,password:$password,returnSecureToken:true}')")
+          test "$code" = 200
+          FIREBASE_TOKEN=$(jq -r '.idToken // empty' /tmp/proof/auth.json); test -n "$FIREBASE_TOKEN"
+
+          code=$(curl -sS --max-time 45 -o /tmp/proof/create.json -w '%{http_code}' -X POST "$SPACE_URL/api/recroom-public/sessions" -H "authorization: Bearer $FIREBASE_TOKEN" -H 'content-type: application/json' --data '{"buildId":"recroom-2022-05-19"}')
+          test "$code" = 202
+          SESSION_ID=$(jq -r '.sessionId // empty' /tmp/proof/create.json)
+          ACCESS_TOKEN=$(jq -r '.sessionAccessToken // empty' /tmp/proof/create.json)
+          test -n "$SESSION_ID"; test -n "$ACCESS_TOKEN"
+
+          READY=0
+          for i in $(seq 1 100); do
+            curl -fsS --max-time 20 "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID?accessToken=$ACCESS_TOKEN" -o /tmp/proof/status.json
+            state=$(jq -r '.state // empty' /tmp/proof/status.json)
+            echo "proof-launch[$i] state=$state phase=$(jq -r '.phase // empty' /tmp/proof/status.json) progress=$(jq -r '.progress // 0' /tmp/proof/status.json)"
+            if [ "$state" = ready ]; then READY=1; break; fi
+            if [ "$state" = failed ]; then cat /tmp/proof/status.json; exit 1; fi
+            sleep 3
+          done
+          test "$READY" = 1
+
+          code=$(curl -sS --max-time 30 -o /tmp/proof/capture-create.json -w '%{http_code}' -X POST "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures?accessToken=$ACCESS_TOKEN")
+          test "$code" = 202
+          CAPTURE_ID=$(jq -r '.captureId // empty' /tmp/proof/capture-create.json); test -n "$CAPTURE_ID"
+          CAPREADY=0
+          for i in $(seq 1 30); do
+            curl -fsS --max-time 20 "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures/$CAPTURE_ID?accessToken=$ACCESS_TOKEN" -o /tmp/proof/capture-status.json
+            state=$(jq -r '.state // empty' /tmp/proof/capture-status.json)
+            if [ "$state" = ready ]; then CAPREADY=1; break; fi
+            if [ "$state" = failed ]; then cat /tmp/proof/capture-status.json; exit 1; fi
+            sleep 2
+          done
+          test "$CAPREADY" = 1
+          curl -fsS --max-time 30 "$SPACE_URL/api/recroom-public/sessions/$SESSION_ID/captures/$CAPTURE_ID/image?accessToken=$ACCESS_TOKEN" -o /tmp/proof/recroom-live.jpg
+          BYTES=$(stat -c '%s' /tmp/proof/recroom-live.jpg); test "$BYTES" -gt 1000
+          SHA=$(sha256sum /tmp/proof/recroom-live.jpg | awk '{print $1}')
+          jq -n \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg sessionId "$SESSION_ID" \
+            --arg captureId "$CAPTURE_ID" \
+            --arg screenshotSha256 "$SHA" \
+            --argjson screenshotBytes "$BYTES" \
+            --slurpfile capability /tmp/proof/capability.json \
+            --slurpfile status /tmp/proof/status.json \
+            --slurpfile capture /tmp/proof/capture-status.json \
+            '{ok:true,runId:$runId,targetBuild:"7225744",targetManifest:"7611535694620830622",sessionId:$sessionId,captureId:$captureId,screenshotBytes:$screenshotBytes,screenshotSha256:$screenshotSha256,capability:$capability[0],sessionStatus:$status[0],captureStatus:$capture[0]}' \
+            > diagnostics/aug25-2021-proof.json
+      - name: Commit proof metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/aug25-2021-proof.json
+          git commit -m 'Record inspectable Aug 25 2021 live proof'
+          git pull --rebase origin main
+          git push
+      - name: Upload proof screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: recroom-aug25-2021-live-proof
+          path: /tmp/proof/recroom-live.jpg
+          if-no-files-found: error
+          retention-days: 1
