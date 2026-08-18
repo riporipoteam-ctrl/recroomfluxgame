@@ -27,7 +27,7 @@
     "targetManifest": "7611535694620830622",
     "graphics": "Wine/WineD3D on the Space Linux renderer",
     "prefixBootstrap": "hardened-v3",
-    "prefixBootstrapBound": true,
+    "prefixBootstrapBound": false,
     "wineBinary": "/usr/bin/wine",
     "winebootBinary": "/usr/bin/wineboot",
     "runtimePatch": "render-audio-v3-fast-redirect",
@@ -64,7 +64,25 @@
     "recNetTlsVerificationBypassed": false,
     "recNetLoopbackTls": false,
     "failureDiagnosticsPatch": "graphics-failure-diagnostics-v2-tls-uri",
-    "lastGraphicsFailure": null,
+    "lastGraphicsFailure": {
+        "revision": "graphics-failure-diagnostics-v2-tls-uri",
+        "timestamp": 1787057167.463,
+        "hostId": "ripo-wine-32e1d893e8734840",
+        "error": "Official Steam client did not install into the Wine prefix. wine: failed to load L\"\\\\??\\\\C:\\\\windows\\\\syswow64\\\\ntdll.dll\" error c0000135 Application could not be started, or no application associated with the specified file. ShellExecuteEx failed: | Runtime trace: {\"ts\":1787057066.743,\"event\":\"session-start\",\"hostId\":\"ripo-wine-32e1d893e8734840\",\"sessionId\":\"0a6da854-0995-4b60-8c06-f95eb38d8557\"} | {\"ts\":1787057067.389,\"event\":\"graphics-probe\",\"display\":\":90\",\"glxinfo\":\"/usr/bin/glxinfo\",\"vulkanIcd\":\"/usr/share/vulkan/icd.d/lvp_icd.json\",\"glxExit\":0,\"glx\":\"name of display: :90 display: :90 screen: 0 direct rendering: Yes Extended renderer info (GLX_MESA_query_renderer): Vendor: Mesa (0xffffffff) Device: llvmpipe (LLVM 19.1.7, 256 bits) (0xffffffff) Version: 25.0.7 Accelerated: no Video memory: 2047961MB Unified memory: yes Preferred profile: core (0x1) Max core profile version: 4.5 Max compat profile version: 4.5 Max GLES1 profile version: 1.1 Max GLES[23] profile version: 3.2 Memory info (GL_ATI_meminfo): VBO free memory - total: 31 MB, largest block: 31 MB VBO free aux. memory - total: 981609 MB, largest block: 981609 MB Texture free memory - total: 31 MB, largest block: 31 M...",
+        "renderProfile": "starting",
+        "renderMetrics": "",
+        "fatalWindow": "",
+        "graphics": {
+            "display": ":90",
+            "glxExit": 0,
+            "glx": "vendor=Mesa; renderer=llvmpipe (LLVM 19.1.7, 256 bits); core=4.5 (Core Profile) Mesa 25.0.7-2+deb13u1; version=4.5 (Compatibility Profile) Mesa 25.0.7-2+deb13u1",
+            "glxError": "",
+            "vulkanIcd": "/usr/share/vulkan/icd.d/lvp_icd.json"
+        },
+        "renderEvents": [],
+        "recNet": [],
+        "profiles": []
+    },
     "exactBuild": true,
     "targetFingerprint": "bb05d618fa989ccd4bd446b45f76f3786353cc00656d0d8d3060216c9910d46f",
     "clientFingerprint": {
