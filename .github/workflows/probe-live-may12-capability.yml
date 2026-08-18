@@ -1,4 +1,4 @@
-name: Probe live May 12 Rec Room capability
+name: Probe live production Rec Room capability
 
 on:
   workflow_dispatch:
@@ -15,36 +15,26 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Capture live May 12 capability and failure diagnostics
+      - name: Capture live production capability
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p diagnostics
           URL='https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/capabilities'
-          code=$(curl -sS --max-time 30 -H 'Cache-Control: no-cache' -o diagnostics/live-may12-capability.json -w '%{http_code}' "$URL?ts=$(date +%s)" || true)
+          code=$(curl -sS --max-time 30 -H 'Cache-Control: no-cache' -o diagnostics/live-production-capability.json -w '%{http_code}' "$URL?ts=$(date +%s)" || true)
           echo "HTTP=$code"
           test "$code" = 200
-          python3 -m json.tool diagnostics/live-may12-capability.json > /tmp/pretty.json
-          mv /tmp/pretty.json diagnostics/live-may12-capability.json
-          python3 - <<'PY'
-          import json
-          p=json.load(open('diagnostics/live-may12-capability.json'))
-          print(json.dumps({
-            'exactBuild':p.get('exactBuild'),
-            'targetBuild':p.get('targetBuild'),
-            'targetManifest':p.get('targetManifest'),
-            'transport':p.get('recNetTransport'),
-            'redirectPatch':p.get('recNetRedirectPatch'),
-            'lastGraphicsFailure':p.get('lastGraphicsFailure'),
-          }, indent=2))
-          PY
+          python3 -m json.tool diagnostics/live-production-capability.json > /tmp/pretty.json
+          mv /tmp/pretty.json diagnostics/live-production-capability.json
+          cat diagnostics/live-production-capability.json
       - name: Commit diagnostic snapshot
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add diagnostics/live-may12-capability.json
+          git add diagnostics/live-production-capability.json
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Record live May 12 Rec Room failure diagnostics'
-          git push
+          git commit -m 'Record live production Rec Room capability'
+          for n in 1 2 3 4 5; do git pull --rebase origin main && git push && exit 0; sleep 2; done
+          exit 1
