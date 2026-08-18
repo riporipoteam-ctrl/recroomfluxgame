@@ -1,5 +1,6 @@
 name: Audit Docker Space Wine32 and Steam bootstrap
 
+# Rerun marker: latest Docker branch + persisted logs
 on:
   workflow_dispatch:
   push:
@@ -27,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker build --pull -t ripo-space-wine32 server/hf-space
+          docker build --pull -t ripo-space-wine32 server/hf-space 2>&1 | tee /tmp/docker-build.log
           docker run --rm ripo-space-wine32 bash -lc '
             set -euo pipefail
             echo "ARCH=$(dpkg --print-architecture)"
@@ -60,7 +61,7 @@ jobs:
             test -f "$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
             file "$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
             echo "OFFICIAL_STEAM_INSTALL_PRESENT=true"
-          '
+          ' 2>&1 | tee /tmp/docker-run.log
       - name: Persist audit result
         if: always()
         shell: bash
@@ -75,6 +76,12 @@ jobs:
             echo "TARGET_BUILD=7225744"
             echo "WINE32=i386"
             echo "STEAM_INSTALLER=official"
+            echo
+            echo "===== DOCKER BUILD TAIL ====="
+            tail -n 100 /tmp/docker-build.log 2>/dev/null || true
+            echo
+            echo "===== DOCKER RUN TAIL ====="
+            tail -n 120 /tmp/docker-run.log 2>/dev/null || true
           } > diagnostics/wine32-docker-space-audit.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
