@@ -1,0 +1,50 @@
+name: Scan 2022 Rec Room builds for RecNet pin material
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/scan-recnet-pin-bytes-2022.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan exact archived binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics /tmp/pinscan
+          python3 - <<'PY' > diagnostics/recnet-pin-scan-2022.txt
+          import urllib.request,hashlib
+          builds=[
+            ('2022-05-12T06-50-19Z','8715820'),
+            ('2022-04-28T06-50-43Z','8628560'),
+            ('2022-04-21T06-50-40Z','8567561'),
+          ]
+          pins=[
+            bytes.fromhex('a7461e4bd2d01f98d5ff780d6eb6b2662384d38cbc4c50835d8977a3e90f13e0'),
+            bytes.fromhex('cb80e833e6da1db731cfd19041d739b3a8fbb1da89a96bd46246b80e8ffa0053'),
+          ]
+          for date,bid in builds:
+            print('===',date,bid,'===')
+            for rel in ('GameAssembly.dll','RecRoom_Data/il2cpp_data/Metadata/global-metadata.dat'):
+              url=f'https://archive.recagain.site/{date}/{rel}'
+              b=urllib.request.urlopen(url,timeout=180).read()
+              print(rel,'size',len(b),'sha256',hashlib.sha256(b).hexdigest(),'pin1',b.count(pins[0]),'pin2',b.count(pins[1]),'ns-v2',b.count(b'https://ns.rec.net/?v=2'))
+          PY
+          cat diagnostics/recnet-pin-scan-2022.txt
+      - name: Commit scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/recnet-pin-scan-2022.txt
+          git commit -m 'Record 2022 RecNet pin byte scan'
+          git push
