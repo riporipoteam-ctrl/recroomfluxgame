@@ -1,8 +1,10 @@
 {
   "ok": true,
   "result": "steam-login-required",
-  "runId": "32150480815",
+  "runId": "32150986371",
   "captureId": "",
+  "captureHttp": "503",
+  "captureBody": "{\"detail\":\"The assigned game host is offline.\"}",
   "screenshotBytes": 0,
   "screenshotSha256": "",
   "capability": {
@@ -87,12 +89,12 @@
   "sessionStatus": {
     "ok": true,
     "mode": "remote",
-    "sessionId": "96f30cc8-9589-47ce-99a0-cc68153b6598",
+    "sessionId": "a3eb5d7a-7530-40e1-be0f-952c740d4b4a",
     "state": "ready",
-    "streamUrl": "https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/stream/ripo-wine-f0acbe675210484d/?token=8xx1042JwWHpADzfCGPQcsMHtiHjKoyhkjmynX8ad5Q",
-    "hostId": "ripo-wine-f0acbe675210484d",
+    "streamUrl": "https://echoxr-ripoteam-cloud-pc.hf.space/api/recroom-wine/stream/ripo-wine-8d8b60539e9843be/?token=CowcnL8oo_-Rn-kXIHWcm6wE1KuWjDahIZIyDQe7wFA",
+    "hostId": "ripo-wine-8d8b60539e9843be",
     "buildId": "recroom-2021-08-25",
-    "expiresAtMs": 1787071647634,
+    "expiresAtMs": 1787071946198,
     "error": null,
     "provider": "ripoteam-wine",
     "phase": "steam-login-required",
