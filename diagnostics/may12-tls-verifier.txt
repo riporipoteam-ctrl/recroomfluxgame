@@ -1,0 +1,207 @@
+=== ICertificateVerifyer implementers / nearby declarations ===
+public const CJCJBFNECLL ArrayPrime = 65549;
+	public const CJCJBFNECLL Value = 65550;
+	public const CJCJBFNECLL ValueRest = 65551;
+	public const CJCJBFNECLL String = 65552;
+	public const CJCJBFNECLL End = 65553;
+	public const CJCJBFNECLL Epsilon = 65554;
+}
+
+// Namespace: Org.BouncyCastle.Crypto.Tls
+public class AlwaysValidVerifyer : ICertificateVerifyer // TypeDefIndex: 14417
+{
+	// Methods
+
+	// RVA: 0x552FE0 Offset: 0x5523E0 VA: 0x180552FE0 Slot: 4
+	public bool IsValid(Uri targetUri, X509CertificateStructure[] certs) { }
+
+	// RVA: 0x554AB0 Offset: 0x553EB0 VA: 0x180554AB0
+	public void .ctor() { }
+}
+
+// Namespace: Org.BouncyCastle.Crypto.Tls
+public interface ICertificateVerifyer // TypeDefIndex: 14418
+{
+	// Methods
+
+	// RVA: -1 Offset: -1 Slot: 0
+	public abstract bool IsValid(Uri targetUri, X509CertificateStructure[] certs);
+}
+
+// Namespace: Org.BouncyCastle.Crypto.Tls
+public interface IClientCredentialsProvider // TypeDefIndex: 14419
+{
+	// Methods
+
+	// RVA: -1 Offset: -1 Slot: 0
+	public abstract TlsCredentials GetClientCredentials(TlsContext context, CertificateRequest certificateRequest);
+}
+
+// Namespace: Org.BouncyCastle.Crypto.Tls
+public class LegacyTlsAuthentication : TlsAuthentication // TypeDefIndex: 14420
+{
+	// Fields
+	protected ICertificateVerifyer verifyer; // 0x10
+	protected IClientCredentialsProvider credProvider; // 0x18
+	protected Uri TargetUri; // 0x20
+
+	// Methods
+
+	// RVA: 0x78A880 Offset: 0x789C80 VA: 0x18078A880
+	public void .ctor(Uri targetUri, ICertificateVerifyer verifyer, IClientCredentialsProvider prov) { }
+
+	// RVA: 0x1EBD700 Offset: 0x1EBCB00 VA: 0x181EBD700 Slot: 6
+	public virtual void NotifyServerCertificate(Certificate serverCertificate) { }
+
+	// RVA: 0x1EBD630 Offset: 0x1EBCA30 VA: 0x181EBD630 Slot: 7
+	public virtual TlsCredentials GetClientCredentials(TlsContext context, CertificateRequest certificateRequest) { }
+}
+
+// Namespace: Org.BouncyCastle.Crypto.Tls
+public sealed class LegacyTlsClient : DefaultTlsClient // TypeDefIndex: 14421
+{
+	// Fields
+	private readonly Uri TargetUri; // 0x58
+	private readonly ICertificateVerifyer verifyer; // 0x60
+	private readonly IClientCredentialsProvider credProvider; // 0x68
+
+	// Methods
+
+	// RVA: 0x1EBD8C0 Offset: 0x1EBCCC0 VA: 0x181EBD8C0
+	public void .ctor(Uri targetUri, ICertificateVerifyer verifyer, IClientCredentialsProvider prov, List<string> hostNames) { }
+
+	// RVA: 0x1EBD820 Offset: 0x1EBCC20 VA: 0x181EBD820 Slot: 58
+	public override TlsAuthentication GetAuthentication() { }
+}
+
+// Namespace: 
+public sealed class JMACNNLCPLO : MulticastDelegate // TypeDefIndex: 14422
+{
+	// Methods
+
+	// RVA: 0x577060 Offset: 0x576460 VA: 0x180577060
+	public void .ctor(object ADMHEHMFJFN, IntPtr PHHPNEPFEIA) { }
+
+	// RVA: 0x611780 Offset: 0x610B80 VA: 0x180611780 Slot: 13
+	public virtual void Invok
+
+---
+
+NBEMBDPA.KEKGICHADKK EJCBPOMNGLD, string IOHPBCJMLDB = "") { }
+
+	// RVA: 0x214C540 Offset: 0x214B940 VA: 0x18214C540
+	private static bool DAIDABJADIB(byte[] GNKLMCIFODF, byte[] FFOHEAHJJEI) { }
+
+	// RVA: 0x214D0B0 Offset: 0x214C4B0 VA: 0x18214D0B0
+	private static void .cctor() { }
+}
+
+// Namespace: 
+public class HIFHMCGOGOC.EOMCBJGODKP : ICertificateVerifyer // TypeDefIndex: 17265
+{
+	// Fields
+	public static readonly HIFHMCGOGOC.EOMCBJGODKP KFKKKAOCIAC; // 0x68E60A0
+
+	// Methods
+
+	// RVA: 0x213E8B0 Offset: 0x213DCB0 VA: 0x18213E8B0 Slot: 4
+	public bool IsValid(Uri MGFBGKNPAOO, X509CertificateStructure[] HCOFMEIFCBF) { }
+
+	// RVA: 0x554AB0 Offset: 0x553EB0 VA: 0x180554AB0
+	public void .ctor() { }
+
+	// RVA: 0x213EB60 Offset: 0x213DF60 VA: 0x18213EB60
+	private static void .cctor() { }
+}
+
+// Namespace: 
+[CompilerGeneratedAttribute] // RVA: 0xB0710 Offset: 0xAFB10 VA: 0x1800B0710
+private sealed class HIFHMCGOGOC.OKNJELGJOJB // TypeDefIndex: 17266
+{
+	// Fields
+	public PIMNBEMBDPA.KEKGICHADKK hileType; // 0x10
+	public string message; // 0x18
+
+	// Methods
+
+	// RVA: 0x554AB0 Offset: 0x553EB0 VA: 0x180554AB0
+	public void .ctor() { }
+
+	// RVA: 0x2156280 Offset: 0x2155680 VA: 0x182156280
+	internal void <SafeReportResult>b__0() { }
+}
+
+// Namespace: 
+public enum EKMPCKIICKO // TypeDefIndex: 17267
+{
+	// Fields
+	public int value__; // 0x0
+	public const EKMPCKIICKO RoomKey = 0;
+	public const EKMPCKIICKO RoomConsumable = 1;
+	public const EKMPCKIICKO RoomCurrencyPurchaseOffer = 2;
+	public const EKMPCKIICKO UNDEFINED = 3;
+}
+
+// Namespace: 
+public class JLOHOHBKNJL : IEquatable<JLOHOHBKNJL> // TypeDefIndex: 17268
+{
+	// Fields
+	public EKMPCKIICKO OKFOPMANJFG; // 0x10
+	public Guid IBIPPJBIHGA; // 0x14
+
+	// Methods
+
+	// RVA: 0x2CB3FB0 Offset: 0x2CB33B0 VA: 0x182CB3FB0 Slot: 3
+	public override string ToString() { }
+
+	// RVA: 0x2CB3F30 Offset: 0x2CB3330 VA: 0x182CB3F30 Slot: 2
+	public override int GetHashCode() { }
+
+	// RVA: 0x2CB3DB0 Offset: 0x2CB31B0 VA: 0x182CB3DB0 Slot: 4
+	public bool Equals(JLOHOHBKNJL OGCBGOIPCGM) { }
+
+	// RVA: 0x2CB3E00 Offset: 0x2CB3200 VA: 0x182CB3E00 Slot: 0
+	public override bool Equals(object CMGFKLKICHP) { }
+
+	// RVA: 0x554AB0 Offset: 0x553EB0 VA: 0x180554AB0
+	public void .ctor() { }
+}
+
+// Namespace: 
+[ExtensionAttribute] // RVA: 0xB0710 Offset: 0xAFB10 VA: 0x1800B0710
+public static class MJNMHJNAFLC // TypeDefIndex: 17269
+{
+	// Methods
+
+	[ExtensionAttribute] // RVA: 0xB0710 Offset: 0xAFB10 VA: 0x1800B0710
+	// RVA: 0x20FE700 Offset: 0x20FDB00 VA: 0x1820FE700
+	public static JLOHOHBKNJL MCCBFANBBAF(LAEIOKFEDIB CBOKIMKBPGE) { }
+
+	// RVA: 0x20FE560 Offset: 0x20FD960 VA: 0x1820FE560
+	public static JLOHOHBKNJL FDEELJJHGNH(string ECBIPABHJAP) { }
+}
+
+// Namespace: 
+[CEKDOHEDOAA] // RVA: 0xB0710 Offset: 0xAFB10 VA: 0x1800B0710
+public class LAEIOKFEDIB : HBN
+
+---
+
+=== METHOD ADDRESSES ===
+BestHTTP.HTTPConnection$$Connect 0x2503c10
+BestHTTP.HTTPManager$$.cctor 0x250a600
+BestHTTP.HTTPManager$$get_DefaultCertificateVerifyer 0x250acd0
+BestHTTP.AlwaysValidVerifyer$$IsValid 0x0
+BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.LegacyTlsAuthentication$$NotifyServerCertificate 0x0
+BestHTTP.HTTPRequest$$set_CustomCertificateVerifyer 0x79b820
+
+=== DISASM BestHTTP.HTTPConnection$$Connect @ 0x2503c10 ===
+
+=== DISASM BestHTTP.HTTPManager$$.cctor @ 0x250a600 ===
+
+=== DISASM BestHTTP.HTTPManager$$get_DefaultCertificateVerifyer @ 0x250acd0 ===
+
+=== DISASM BestHTTP.HTTPRequest$$set_CustomCertificateVerifyer @ 0x79b820 ===
+
+=== DIRECT SETTER XREFS ===
+count 0
