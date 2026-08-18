@@ -1,5 +1,6 @@
 name: Smoke Aug 25 2021 Steam login stream
 
+# Rerun marker: post-Steam deployment health 2026-08-18
 on:
   workflow_dispatch:
   push:
